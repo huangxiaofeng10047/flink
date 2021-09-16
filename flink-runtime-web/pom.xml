@@ -261,6 +261,8 @@ under the License.
 							<goal>install-node-and-npm</goal>
 						</goals>
 						<configuration>
+						<!-- <nodeDownloadRoot>https://registry.npm.taobao.org/dist/</nodeDownloadRoot> -->
+						<npmDownloadRoot>https://registry.npmjs.org/npm/-/</npmDownloadRoot>
 							<nodeVersion>v12.14.1</nodeVersion>
 							<npmVersion>6.13.4</npmVersion>
 						</configuration>
