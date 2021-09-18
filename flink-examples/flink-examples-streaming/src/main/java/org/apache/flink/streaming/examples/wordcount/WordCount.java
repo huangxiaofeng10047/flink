@@ -95,6 +95,7 @@ public class WordCount {
         }
         // execute program
         env.execute("Streaming WordCount");
+        //System.out.println(env.getStreamGraph().getStreamingPlanAsJSON());
     }
 
     // *************************************************************************
