@@ -56,10 +56,12 @@ abstract class AbstractOneInputTransformationTranslator<IN, OUT, OP extends Tran
         checkNotNull(context);
 
         final StreamGraph streamGraph = context.getStreamGraph();
+        //note: 获取 share group
         final String slotSharingGroup = context.getSlotSharingGroup();
         final int transformationId = transformation.getId();
         final ExecutionConfig executionConfig = streamGraph.getExecutionConfig();
 
+        //note: 添加一个 Operator（streamGraph 端会添加一个 StreamNode）
         streamGraph.addOperator(
                 transformationId,
                 slotSharingGroup,
@@ -88,6 +90,7 @@ abstract class AbstractOneInputTransformationTranslator<IN, OUT, OP extends Tran
                         + parentTransformations.size());
 
         for (Integer inputId : context.getStreamNodeIds(parentTransformations.get(0))) {
+            //note: 根据输入的 id，给这个 node 在 graph 中设置相应的 graph
             streamGraph.addEdge(inputId, transformationId, 0);
         }
 

@@ -311,7 +311,6 @@ public class StreamGraphGenerator {
         configureStreamGraph(streamGraph);
 
         alreadyTransformed = new IdentityHashMap<>();
-
         for (Transformation<?> transformation : transformations) {
             transform(transformation);
         }
@@ -819,7 +818,7 @@ public class StreamGraphGenerator {
 
         final TransformationTranslator.Context context =
                 new ContextImpl(this, streamGraph, slotSharingGroup, configuration);
-
+        //note: 根据 transform 的类型，做相应不同的转换
         return shouldExecuteInBatchMode
                 ? translator.translateForBatch(transform, context)
                 : translator.translateForStreaming(transform, context);

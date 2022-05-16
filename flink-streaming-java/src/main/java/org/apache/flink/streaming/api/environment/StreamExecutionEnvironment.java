@@ -1869,8 +1869,9 @@ public class StreamExecutionEnvironment {
         boolean isParallel = function instanceof ParallelSourceFunction;
 
         clean(function);
-
+        //note: 创建一个operator
         final StreamSource<OUT, ?> sourceOperator = new StreamSource<>(function);
+        //note: 创建 DataStreamSource（这里再创建 DataStreamSource 对象时，会创建一个 SourceTransformation 对象）
         return new DataStreamSource<>(
                 this, resolvedTypeInfo, sourceOperator, isParallel, sourceName, boundedness);
     }
@@ -2504,6 +2505,7 @@ public class StreamExecutionEnvironment {
         if (resolvedTypeInfo == null && source instanceof ResultTypeQueryable) {
             resolvedTypeInfo = ((ResultTypeQueryable<OUT>) source).getProducedType();
         }
+        //note: 找到相应的 TypeInformation
         if (resolvedTypeInfo == null) {
             try {
                 resolvedTypeInfo =
