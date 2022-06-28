@@ -169,6 +169,13 @@ under the License.
 			<artifactId>guava</artifactId>
 			<version>30.1.1-jre</version>
 		</dependency>
+		<!-- https://mvnrepository.com/artifact/io.confluent/kafka-schema-serializer -->
+		<dependency>
+			<groupId>io.confluent</groupId>
+			<artifactId>kafka-schema-serializer</artifactId>
+			<version>6.2.2</version>
+		</dependency>
+
 	</dependencies>
 
 	<build>
