@@ -131,6 +131,14 @@ under the License.
 				</exclusion>
 			</exclusions>
 		</dependency>
+		<!-- https://mvnrepository.com/artifact/io.confluent/kafka-schema-serializer -->
+		<dependency>
+			<groupId>io.confluent</groupId>
+			<artifactId>kafka-schema-serializer</artifactId>
+			<version>6.2.2</version>
+		</dependency>
+
+
 
 		<dependency>
 			<groupId>org.apache.avro</groupId>
