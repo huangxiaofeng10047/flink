@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue Jun 06 12:44:34 CST 2023
+hadoop-hdfs-2.10.2.pom>nexus-aliyun=
+hadoop-hdfs-2.10.2-tests.jar>nexus-aliyun=
+hadoop-hdfs-2.10.2.jar>nexus-aliyun=

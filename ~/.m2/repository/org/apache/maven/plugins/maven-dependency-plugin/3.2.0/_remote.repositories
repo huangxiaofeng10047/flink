@@ -1,0 +1,4 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue Jun 06 12:37:56 CST 2023
+maven-dependency-plugin-3.2.0.jar>nexus-aliyun=
+maven-dependency-plugin-3.2.0.pom>nexus-aliyun=

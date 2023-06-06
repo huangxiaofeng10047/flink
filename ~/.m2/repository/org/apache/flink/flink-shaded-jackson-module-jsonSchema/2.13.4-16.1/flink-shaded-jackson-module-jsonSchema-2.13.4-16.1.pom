@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.apache.flink</groupId>
+    <artifactId>flink-shaded-jackson-parent</artifactId>
+    <version>2.13.4-16.1</version>
+  </parent>
+  <groupId>org.apache.flink</groupId>
+  <artifactId>flink-shaded-jackson-module-jsonSchema</artifactId>
+  <version>2.13.4-16.1</version>
+  <name>flink-shaded-jackson-module-jsonSchema-2</name>
+  <licenses>
+    <license>
+      <name>The Apache Software License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>shade-flink</id>
+            <configuration>
+              <artifactSet>
+                <includes combine.children="append">
+                  <include>javax.validation:validation-api</include>
+                </includes>
+              </artifactSet>
+              <relocations combine.children="append">
+                <relocation>
+                  <pattern>javax.validation</pattern>
+                  <shadedPattern>${shading.prefix}.jackson2.javax.validation</shadedPattern>
+                </relocation>
+              </relocations>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+  <profiles>
+    <profile>
+      <id>license-check</id>
+      <properties>
+        <flink.ci.license.suffix>-2</flink.ci.license.suffix>
+      </properties>
+    </profile>
+  </profiles>
+</project>

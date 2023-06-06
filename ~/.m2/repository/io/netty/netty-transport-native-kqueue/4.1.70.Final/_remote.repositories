@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue Jun 06 12:45:30 CST 2023
+netty-transport-native-kqueue-4.1.70.Final.pom>conjars-https=
+netty-transport-native-kqueue-4.1.70.Final-osx-x86_64.jar>conjars-https=
+netty-transport-native-kqueue-4.1.70.Final-osx-aarch_64.jar>conjars-https=
