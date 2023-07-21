@@ -25,6 +25,7 @@ import org.apache.flink.configuration.description.Description;
 import java.time.Duration;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.configuration.description.TextElement.code;
 import static org.apache.flink.configuration.description.TextElement.text;
 
 /** Configuration parameters for REST communication. */
@@ -57,6 +58,17 @@ public class RestOptions {
                             "The port that the server binds itself. Accepts a list of ports (“50100,50101”), ranges"
                                     + " (“50100-50200”) or a combination of both. It is recommended to set a range of ports to avoid"
                                     + " collisions when multiple Rest servers are running on the same machine.");
+
+    /** The url prefix that should be used by clients to construct the full target url. */
+    public static final ConfigOption<String> URL_PREFIX =
+            key("rest.url-prefix")
+                    .stringType()
+                    .defaultValue("/")
+                    .withDescription(
+                            "The url prefix that should be used by clients to construct the full target url, must start and end with '/'."
+                                    + " This will be added between the address and version prefix. For example, if the option is set to '/foo/',"
+                                    + " the overview query URL will be transformed to 'localhost:8081/foo/v1/overview'."
+                                    + " Attention: This option is respected only if the high-availability configuration is NONE.");
 
     /** The address that should be used by clients to connect to the server. */
     @Documentation.Section(Documentation.Sections.COMMON_HOST_PORT)
@@ -181,6 +193,29 @@ public class RestOptions {
                             "Thread priority of the REST server's executor for processing asynchronous requests. "
                                     + "Lowering the thread priority will give Flink's main components more CPU time whereas "
                                     + "increasing will allocate more time for the REST server's processing.");
+
+    /** Duration from write, after which cached checkpoints statistics are cleaned up. */
+    @Documentation.Section(Documentation.Sections.EXPERT_REST)
+    public static final ConfigOption<Duration> CACHE_CHECKPOINT_STATISTICS_TIMEOUT =
+            key("rest.cache.checkpoint-statistics.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(WebOptions.REFRESH_INTERVAL.defaultValue()))
+                    .withFallbackKeys(WebOptions.REFRESH_INTERVAL.key())
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Duration from write after which cached checkpoints statistics are cleaned up. For backwards compatibility, if no value is configured, %s will be used instead.",
+                                            code(WebOptions.REFRESH_INTERVAL.key()))
+                                    .build());
+
+    /** Maximum number of entries in the checkpoint statistics cache. */
+    @Documentation.Section(Documentation.Sections.EXPERT_REST)
+    public static final ConfigOption<Integer> CACHE_CHECKPOINT_STATISTICS_SIZE =
+            key("rest.cache.checkpoint-statistics.size")
+                    .intType()
+                    .defaultValue(1000)
+                    .withDescription(
+                            "Maximum number of entries in the checkpoint statistics cache.");
 
     /** Enables the experimental flame graph feature. */
     @Documentation.Section(Documentation.Sections.EXPERT_REST)

@@ -88,6 +88,18 @@ public interface Buffer {
     BufferRecycler getRecycler();
 
     /**
+     * Sets the buffer's recycler.
+     *
+     * <p>Note that updating the recycler is an unsafe operation and this method cannot guarantee
+     * thread safety. It is important for the caller to fully understand the consequences of calling
+     * this method. Incorrectly updating the buffer recycler can result in a leak of the buffer due
+     * to using a wrong recycler to recycle buffer. Therefore, be careful when calling this method.
+     *
+     * @param bufferRecycler the new buffer recycler
+     */
+    void setRecycler(BufferRecycler bufferRecycler);
+
+    /**
      * Releases this buffer once, i.e. reduces the reference count and recycles the buffer if the
      * reference count reaches <tt>0</tt>.
      *
@@ -289,7 +301,10 @@ public interface Buffer {
          * Indicates that this subpartition state is fully recovered (emitted). Further data can be
          * consumed after unblocking.
          */
-        RECOVERY_COMPLETION(false, true, true, false, false);
+        RECOVERY_COMPLETION(false, true, true, false, false),
+
+        /** {@link #END_OF_SEGMENT} indicates that a segment is finished in a subpartition. */
+        END_OF_SEGMENT(false, true, false, false, false);
 
         private final boolean isBuffer;
         private final boolean isEvent;

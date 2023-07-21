@@ -38,6 +38,7 @@ Flink SQL supports the following SHOW statements for now:
 - SHOW TABLES
 - SHOW CREATE TABLE
 - SHOW COLUMNS
+- SHOW PARTITIONS
 - SHOW VIEWS
 - SHOW CREATE VIEW
 - SHOW FUNCTIONS
@@ -740,6 +741,65 @@ show columns from orders not like '%_r';
 4 rows in set
 ```
 
+## SHOW PARTITIONS
+
+```sql
+SHOW PARTITIONS [[catalog_name.]database.]<table_name> [ PARTITION <partition_spec>]
+
+<partition_spec>:
+  (key1=val1, key2=val2, ...)
+```
+
+Show all partitions of the partitioned table with the given table name and optional partition clause.
+
+**PARTITION**
+Show all the partitions which are under the provided <partition_spec> in the given table.
+
+### SHOW PARTITIONS EXAMPLES
+
+Assumes that the partitioned table `table1` in the `database1` database which is located in the `catalog1` catalog has the following partitions:
+
+```sql
++---------+-----------------------------+
+|      id |                        date |
++---------+-----------------------------+
+|    1001 |                  2020-01-01 |
+|    1002 |                  2020-01-01 |
+|    1002 |                  2020-01-02 |
++---------+-----------------------------+
+```
+
+- Shows all partitions of the given table.
+
+```sql
+show partitions table1;
+-- show partitions database1.table1;
+-- show partitions catalog1.database1.table1;
++---------+-----------------------------+
+|      id |                        date |
++---------+-----------------------------+
+|    1001 |                  2020-01-01 |
+|    1002 |                  2020-01-01 |
+|    1002 |                  2020-01-02 |
++---------+-----------------------------+
+3 rows in set
+```
+
+- Shows all partitions of the given table with the given partition spec.
+
+```sql
+show partitions table1 partition (id=1002);
+-- show partitions database1.table1 partition (id=1002);
+-- show partitions catalog1.database1.table1 partition (id=1002);
++---------+-----------------------------+
+|      id |                        date |
++---------+-----------------------------+
+|    1002 |                  2020-01-01 |
+|    1002 |                  2020-01-02 |
++---------+-----------------------------+
+2 rows in set
+```
+
 ## SHOW VIEWS
 
 ```sql
@@ -759,13 +819,23 @@ Show create view statement for specified view.
 ## SHOW FUNCTIONS
 
 ```sql
-SHOW [USER] FUNCTIONS
+SHOW [USER] FUNCTIONS [ ( FROM | IN ) [catalog_name.]database_name ] [ [NOT] (LIKE | ILIKE) <sql_like_pattern> ]	
 ```
 
-Show all functions including system functions and user-defined functions in the current catalog and current database.
+Show all functions including system functions and user-defined functions for an optionally specified database. If no database is specified then the functions are returned from the current database. Additionally, a `<sql_like_pattern>` can be used to filter the functions.
 
 **USER**
-Show only user-defined functions in the current catalog and current database.
+Show only user-defined functions for an optionally specified database. If no database is specified then the functions are returned from the current database. Additionally, a `<sql_like_pattern>` can be used to filter the functions.
+
+**LIKE**
+Show all functions with a `LIKE` clause, whose name is similar to the `<sql_like_pattern>`.
+
+The syntax of the SQL pattern in the `LIKE` clause is the same as that of the `MySQL` dialect.
+* `%` matches any number of characters, even zero characters, and `\%` matches one `%` character.
+* `_` matches exactly one character, `\_` matches one `_` character.
+
+**ILIKE**
+The same behavior as `LIKE` but the SQL pattern is case-insensitive.
 
 ## SHOW MODULES
 

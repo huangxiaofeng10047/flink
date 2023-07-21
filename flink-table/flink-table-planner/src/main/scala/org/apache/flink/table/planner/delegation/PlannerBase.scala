@@ -217,6 +217,14 @@ abstract class PlannerBase(
           getFlinkContext.getClassLoader
         )
 
+      case stagedSink: StagedSinkModifyOperation =>
+        val input = createRelBuilder.queryOperation(modifyOperation.getChild).build()
+        DynamicSinkUtils.convertSinkToRel(
+          createRelBuilder,
+          input,
+          stagedSink,
+          stagedSink.getDynamicTableSink)
+
       case catalogSink: SinkModifyOperation =>
         val input = createRelBuilder.queryOperation(modifyOperation.getChild).build()
         val dynamicOptions = catalogSink.getDynamicOptions
@@ -470,7 +478,7 @@ abstract class PlannerBase(
       TimeZone.getTimeZone(TableConfigUtils.getLocalTimeZone(tableConfig)).getOffset(epochTime)
     tableConfig.set(TABLE_QUERY_START_LOCAL_TIME, localTime)
 
-    val currentDatabase = catalogManager.getCurrentDatabase
+    val currentDatabase = Option(catalogManager.getCurrentDatabase).getOrElse("")
     tableConfig.set(TABLE_QUERY_CURRENT_DATABASE, currentDatabase)
 
     // We pass only the configuration to avoid reconfiguration with the rootConfiguration

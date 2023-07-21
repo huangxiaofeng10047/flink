@@ -575,6 +575,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                 return;
             case END_OF_DATA:
                 endData(StopMode.DRAIN);
+                notifyEndOfData();
                 return;
             case END_OF_INPUT:
                 // Suspend the mailbox processor, it would be resumed in afterInvoke and finished
@@ -596,9 +597,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
             timer = new GaugePeriodTimer(ioMetrics.getIdleTimeMsPerSecond());
             resumeFuture = inputProcessor.getAvailableFuture();
         } else if (changelogWriterAvailabilityProvider != null) {
-            // currently, waiting for changelog availability is reported as busy
-            // todo: add new metric (FLINK-24402)
-            timer = null;
+            // waiting for changelog availability is reported as busy
+            timer = new GaugePeriodTimer(ioMetrics.getChangelogBusyTimeMsPerSecond());
             resumeFuture = changelogWriterAvailabilityProvider.getAvailableFuture();
         } else {
             // data availability has changed in the meantime; retry immediately
@@ -623,6 +623,10 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
         }
 
         this.endOfDataReceived = true;
+    }
+
+    protected void notifyEndOfData() {
+        environment.getTaskManagerActions().notifyEndOfData(environment.getExecutionId());
     }
 
     protected void setSynchronousSavepoint(long checkpointId) {
@@ -695,6 +699,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
         }
         isRestoring = true;
         closedOperators = false;
+        getEnvironment().getMetricGroup().getIOMetricGroup().markTaskInitializationStarted();
         LOG.debug("Initializing {}.", getName());
 
         operatorChain =

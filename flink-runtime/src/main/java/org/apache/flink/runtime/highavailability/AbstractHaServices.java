@@ -20,14 +20,13 @@ package org.apache.flink.runtime.highavailability;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.AutoCloseableRegistry;
 import org.apache.flink.runtime.blob.BlobStore;
 import org.apache.flink.runtime.blob.BlobStoreService;
 import org.apache.flink.runtime.checkpoint.CheckpointRecoveryFactory;
 import org.apache.flink.runtime.jobmanager.JobGraphStore;
 import org.apache.flink.runtime.leaderelection.DefaultLeaderElectionService;
+import org.apache.flink.runtime.leaderelection.LeaderElection;
 import org.apache.flink.runtime.leaderelection.LeaderElectionDriverFactory;
-import org.apache.flink.runtime.leaderelection.LeaderElectionService;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
 import org.apache.flink.util.ExceptionUtils;
 
@@ -69,10 +68,11 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
 
     private final JobResultStore jobResultStore;
 
-    private final AutoCloseableRegistry closeableRegistry = new AutoCloseableRegistry();
+    private final DefaultLeaderElectionService leaderElectionService;
 
     protected AbstractHaServices(
             Configuration config,
+            LeaderElectionDriverFactory driverFactory,
             Executor ioExecutor,
             BlobStoreService blobStoreService,
             JobResultStore jobResultStore) {
@@ -81,6 +81,8 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
         this.ioExecutor = checkNotNull(ioExecutor);
         this.blobStoreService = checkNotNull(blobStoreService);
         this.jobResultStore = checkNotNull(jobResultStore);
+
+        this.leaderElectionService = new DefaultLeaderElectionService(driverFactory);
     }
 
     @Override
@@ -110,23 +112,23 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
     }
 
     @Override
-    public LeaderElectionService getResourceManagerLeaderElectionService() throws Exception {
-        return createLeaderElectionService(getLeaderPathForResourceManager());
+    public LeaderElection getResourceManagerLeaderElection() {
+        return leaderElectionService.createLeaderElection(getLeaderPathForResourceManager());
     }
 
     @Override
-    public LeaderElectionService getDispatcherLeaderElectionService() throws Exception {
-        return createLeaderElectionService(getLeaderPathForDispatcher());
+    public LeaderElection getDispatcherLeaderElection() {
+        return leaderElectionService.createLeaderElection(getLeaderPathForDispatcher());
     }
 
     @Override
-    public LeaderElectionService getJobManagerLeaderElectionService(JobID jobID) throws Exception {
-        return createLeaderElectionService(getLeaderPathForJobManager(jobID));
+    public LeaderElection getJobManagerLeaderElection(JobID jobID) {
+        return leaderElectionService.createLeaderElection(getLeaderPathForJobManager(jobID));
     }
 
     @Override
-    public LeaderElectionService getClusterRestEndpointLeaderElectionService() throws Exception {
-        return createLeaderElectionService(getLeaderPathForRestServer());
+    public LeaderElection getClusterRestEndpointLeaderElection() {
+        return leaderElectionService.createLeaderElection(getLeaderPathForRestServer());
     }
 
     @Override
@@ -160,7 +162,9 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
         }
 
         try {
-            closeableRegistry.close();
+            if (leaderElectionService != null) {
+                leaderElectionService.close();
+            }
         } catch (Throwable t) {
             exception = ExceptionUtils.firstOrSuppressed(t, exception);
         }
@@ -193,7 +197,9 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
         }
 
         try {
-            closeableRegistry.close();
+            if (leaderElectionService != null) {
+                leaderElectionService.close();
+            }
         } catch (Throwable t) {
             exception = ExceptionUtils.firstOrSuppressed(t, exception);
         }
@@ -239,25 +245,6 @@ public abstract class AbstractHaServices implements HighAvailabilityServices {
                 },
                 executor);
     }
-
-    private LeaderElectionService createLeaderElectionService(String leaderName) throws Exception {
-        final DefaultLeaderElectionService leaderElectionService =
-                new DefaultLeaderElectionService(createLeaderElectionDriverFactory(leaderName));
-        leaderElectionService.startLeaderElectionBackend();
-
-        closeableRegistry.registerCloseable(leaderElectionService);
-        return leaderElectionService;
-    }
-
-    /**
-     * Create {@link LeaderElectionDriverFactory} instance for the specified leaderName.
-     *
-     * @param leaderName ConfigMap name in Kubernetes or child node path in Zookeeper.
-     * @return Return {@code LeaderElectionDriverFactory} used for the {@link
-     *     LeaderElectionService}.
-     */
-    protected abstract LeaderElectionDriverFactory createLeaderElectionDriverFactory(
-            String leaderName);
 
     /**
      * Create leader retrieval service with specified leaderName.

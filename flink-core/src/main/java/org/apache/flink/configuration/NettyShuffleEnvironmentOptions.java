@@ -315,14 +315,16 @@ public class NettyShuffleEnvironmentOptions {
                                     // this raw value must be changed correspondingly
                                     "taskmanager.memory.framework.off-heap.batch-shuffle.size"));
 
-    /** Segment size of hybrid spilled file data index. */
+    /** Region group size of hybrid spilled file data index. */
     @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
-    public static final ConfigOption<Integer> HYBRID_SHUFFLE_SPILLED_INDEX_SEGMENT_SIZE =
-            key("taskmanager.network.hybrid-shuffle.spill-index-segment-size")
+    public static final ConfigOption<Integer> HYBRID_SHUFFLE_SPILLED_INDEX_REGION_GROUP_SIZE =
+            key("taskmanager.network.hybrid-shuffle.spill-index-region-group-size")
                     .intType()
                     .defaultValue(1024)
+                    .withDeprecatedKeys(
+                            "taskmanager.network.hybrid-shuffle.spill-index-segment-size")
                     .withDescription(
-                            "Controls the segment size(in bytes) of hybrid spilled file data index.");
+                            "Controls the region group size(in bytes) of hybrid spilled file data index. ");
 
     /** Max number of hybrid retained regions in memory. */
     @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
@@ -490,6 +492,36 @@ public class NettyShuffleEnvironmentOptions {
                             "The Netty transport type, either \"nio\" or \"epoll\". The \"auto\" means selecting the property mode automatically"
                                     + " based on the platform. Note that the \"epoll\" mode can get better performance, less GC and have more advanced features which are"
                                     + " only available on modern Linux.");
+
+    @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
+    public static final ConfigOption<Integer> CLIENT_TCP_KEEP_IDLE_SECONDS =
+            key("taskmanager.network.netty.client.tcp.keepIdleSec")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The time (in seconds) the connection needs to remain idle before TCP starts sending keepalive probes. "
+                                    + "Note: This will not take effect when using netty transport type of nio with an older version of JDK 8, "
+                                    + "refer to https://bugs.openjdk.org/browse/JDK-8194298.");
+
+    @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
+    public static final ConfigOption<Integer> CLIENT_TCP_KEEP_INTERVAL_SECONDS =
+            key("taskmanager.network.netty.client.tcp.keepIntervalSec")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The time (in seconds) between individual keepalive probes. "
+                                    + "Note: This will not take effect when using netty transport type of nio with an older version of JDK 8, "
+                                    + "refer to https://bugs.openjdk.org/browse/JDK-8194298.");
+
+    @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
+    public static final ConfigOption<Integer> CLIENT_TCP_KEEP_COUNT =
+            key("taskmanager.network.netty.client.tcp.keepCount")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum number of keepalive probes TCP should send before Netty client dropping the connection. "
+                                    + "Note: This will not take effect when using netty transport type of nio with an older version of JDK 8, "
+                                    + "refer to https://bugs.openjdk.org/browse/JDK-8194298.");
 
     // ------------------------------------------------------------------------
     //  Partition Request Options

@@ -19,6 +19,7 @@
 package org.apache.flink.table.catalog;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.CatalogNotExistException;
@@ -28,10 +29,13 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.catalog.listener.CatalogModificationListener;
 import org.apache.flink.table.delegation.Planner;
 import org.apache.flink.table.expressions.resolver.ExpressionResolver.ExpressionResolverBuilder;
 import org.apache.flink.util.Preconditions;
@@ -73,9 +77,9 @@ public final class CatalogManager implements CatalogRegistry {
     private final Map<ObjectIdentifier, CatalogBaseTable> temporaryTables;
 
     // The name of the current catalog and database
-    private String currentCatalogName;
+    private @Nullable String currentCatalogName;
 
-    private String currentDatabaseName;
+    private @Nullable String currentDatabaseName;
 
     private DefaultSchemaResolver schemaResolver;
 
@@ -86,11 +90,14 @@ public final class CatalogManager implements CatalogRegistry {
 
     private final ManagedTableListener managedTableListener;
 
+    private final List<CatalogModificationListener> catalogModificationListeners;
+
     private CatalogManager(
             String defaultCatalogName,
             Catalog defaultCatalog,
             DataTypeFactory typeFactory,
-            ManagedTableListener managedTableListener) {
+            ManagedTableListener managedTableListener,
+            List<CatalogModificationListener> catalogModificationListeners) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(defaultCatalogName),
                 "Default catalog name cannot be null or empty");
@@ -107,6 +114,12 @@ public final class CatalogManager implements CatalogRegistry {
 
         this.typeFactory = typeFactory;
         this.managedTableListener = managedTableListener;
+        this.catalogModificationListeners = catalogModificationListeners;
+    }
+
+    @VisibleForTesting
+    public List<CatalogModificationListener> getCatalogModificationListeners() {
+        return catalogModificationListeners;
     }
 
     public static Builder newBuilder() {
@@ -127,6 +140,9 @@ public final class CatalogManager implements CatalogRegistry {
         private @Nullable ExecutionConfig executionConfig;
 
         private @Nullable DataTypeFactory dataTypeFactory;
+
+        private List<CatalogModificationListener> catalogModificationListeners =
+                Collections.emptyList();
 
         public Builder classLoader(ClassLoader classLoader) {
             this.classLoader = classLoader;
@@ -154,6 +170,12 @@ public final class CatalogManager implements CatalogRegistry {
             return this;
         }
 
+        public Builder catalogModificationListeners(
+                List<CatalogModificationListener> catalogModificationListeners) {
+            this.catalogModificationListeners = catalogModificationListeners;
+            return this;
+        }
+
         public CatalogManager build() {
             checkNotNull(classLoader, "Class loader cannot be null");
             checkNotNull(config, "Config cannot be null");
@@ -163,7 +185,8 @@ public final class CatalogManager implements CatalogRegistry {
                     dataTypeFactory != null
                             ? dataTypeFactory
                             : new DataTypeFactoryImpl(classLoader, config, executionConfig),
-                    new ManagedTableListener(classLoader, config));
+                    new ManagedTableListener(classLoader, config),
+                    catalogModificationListeners);
         }
     }
 
@@ -226,7 +249,7 @@ public final class CatalogManager implements CatalogRegistry {
                 "Catalog name cannot be null or empty.");
 
         if (catalogs.containsKey(catalogName)) {
-            if (currentCatalogName.equals(catalogName)) {
+            if (catalogName.equals(currentCatalogName)) {
                 throw new CatalogException("Cannot drop a catalog which is currently in use.");
             }
             Catalog catalog = catalogs.remove(catalogName);
@@ -282,10 +305,15 @@ public final class CatalogManager implements CatalogRegistry {
      * @throws CatalogNotExistException thrown if the catalog doesn't exist
      * @see CatalogManager#qualifyIdentifier(UnresolvedIdentifier)
      */
-    public void setCurrentCatalog(String catalogName) throws CatalogNotExistException {
+    public void setCurrentCatalog(@Nullable String catalogName) throws CatalogNotExistException {
+        if (catalogName == null) {
+            this.currentCatalogName = null;
+            this.currentDatabaseName = null;
+            return;
+        }
+
         checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(catalogName),
-                "Catalog name cannot be null or empty.");
+                !StringUtils.isNullOrWhitespaceOnly(catalogName), "Catalog name cannot be empty.");
 
         Catalog potentialCurrentCatalog = catalogs.get(catalogName);
         if (potentialCurrentCatalog == null) {
@@ -293,7 +321,7 @@ public final class CatalogManager implements CatalogRegistry {
                     format("A catalog with name [%s] does not exist.", catalogName));
         }
 
-        if (!currentCatalogName.equals(catalogName)) {
+        if (!catalogName.equals(currentCatalogName)) {
             currentCatalogName = catalogName;
             currentDatabaseName = potentialCurrentCatalog.getDefaultDatabase();
 
@@ -323,10 +351,19 @@ public final class CatalogManager implements CatalogRegistry {
      * @see CatalogManager#qualifyIdentifier(UnresolvedIdentifier)
      * @see CatalogManager#setCurrentCatalog(String)
      */
-    public void setCurrentDatabase(String databaseName) {
+    public void setCurrentDatabase(@Nullable String databaseName) {
+        if (databaseName == null) {
+            this.currentDatabaseName = null;
+            return;
+        }
+
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(databaseName),
-                "The database name cannot be null or empty.");
+                "The database name cannot be empty.");
+
+        if (currentCatalogName == null) {
+            throw new CatalogException("Current catalog has not been set.");
+        }
 
         if (!catalogs.get(currentCatalogName).databaseExists(databaseName)) {
             throw new CatalogException(
@@ -335,7 +372,7 @@ public final class CatalogManager implements CatalogRegistry {
                             databaseName, currentCatalogName));
         }
 
-        if (!currentDatabaseName.equals(databaseName)) {
+        if (!databaseName.equals(currentDatabaseName)) {
             currentDatabaseName = databaseName;
 
             LOG.info(
@@ -681,8 +718,37 @@ public final class CatalogManager implements CatalogRegistry {
      */
     public ObjectIdentifier qualifyIdentifier(UnresolvedIdentifier identifier) {
         return ObjectIdentifier.of(
-                identifier.getCatalogName().orElseGet(this::getCurrentCatalog),
-                identifier.getDatabaseName().orElseGet(this::getCurrentDatabase),
+                identifier
+                        .getCatalogName()
+                        .orElseGet(
+                                () -> {
+                                    final String currentCatalog = getCurrentCatalog();
+                                    if (StringUtils.isNullOrWhitespaceOnly(currentCatalog)) {
+                                        throw new ValidationException(
+                                                "A current catalog has not been set. Please use a"
+                                                        + " fully qualified identifier (such as"
+                                                        + " 'my_catalog.my_database.my_table') or"
+                                                        + " set a current catalog using"
+                                                        + " 'USE CATALOG my_catalog'.");
+                                    }
+                                    return currentCatalog;
+                                }),
+                identifier
+                        .getDatabaseName()
+                        .orElseGet(
+                                () -> {
+                                    final String currentDatabase = getCurrentDatabase();
+                                    if (StringUtils.isNullOrWhitespaceOnly(currentDatabase)) {
+                                        throw new ValidationException(
+                                                "A current database has not been set. Please use a"
+                                                        + " fully qualified identifier (such as"
+                                                        + " 'my_database.my_table' or"
+                                                        + " 'my_catalog.my_database.my_table') or"
+                                                        + " set a current database using"
+                                                        + " 'USE my_database'.");
+                                    }
+                                    return currentDatabase;
+                                }),
                 identifier.getObjectName());
     }
 
@@ -941,6 +1007,7 @@ public final class CatalogManager implements CatalogRegistry {
      * handling across different commands.
      */
     private interface ModifyCatalog {
+
         void execute(Catalog catalog, ObjectPath path) throws Exception;
     }
 
@@ -1021,5 +1088,70 @@ public final class CatalogManager implements CatalogRegistry {
         }
         final ResolvedSchema resolvedSchema = view.getUnresolvedSchema().resolve(schemaResolver);
         return new ResolvedCatalogView(view, resolvedSchema);
+    }
+
+    /**
+     * Create a database.
+     *
+     * @param catalogName Name of the catalog for database
+     * @param databaseName Name of the database to be created
+     * @param database The database definition
+     * @param ignoreIfExists Flag to specify behavior when a database with the given name already
+     *     exists: if set to false, throw a DatabaseAlreadyExistException, if set to true, do
+     *     nothing.
+     * @throws DatabaseAlreadyExistException if the given database already exists and ignoreIfExists
+     *     is false
+     * @throws CatalogException in case of any runtime exception
+     */
+    public void createDatabase(
+            String catalogName,
+            String databaseName,
+            CatalogDatabase database,
+            boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException, CatalogException {
+        Catalog catalog = getCatalogOrThrowException(catalogName);
+        catalog.createDatabase(databaseName, database, ignoreIfExists);
+    }
+
+    /**
+     * Drop a database.
+     *
+     * @param catalogName Name of the catalog for database.
+     * @param databaseName Name of the database to be dropped.
+     * @param ignoreIfNotExists Flag to specify behavior when the database does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @param cascade Flag to specify behavior when the database contains table or function: if set
+     *     to true, delete all tables and functions in the database and then delete the database, if
+     *     set to false, throw an exception.
+     * @throws DatabaseNotExistException if the given database does not exist
+     * @throws DatabaseNotEmptyException if the given database is not empty and isRestrict is true
+     * @throws CatalogException in case of any runtime exception
+     */
+    public void dropDatabase(
+            String catalogName, String databaseName, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException, CatalogException {
+        Catalog catalog = getCatalogOrError(catalogName);
+        catalog.dropDatabase(databaseName, ignoreIfNotExists, cascade);
+    }
+
+    /**
+     * Modify an existing database.
+     *
+     * @param catalogName Name of the catalog for database
+     * @param databaseName Name of the database to be dropped
+     * @param newDatabase The new database definition
+     * @param ignoreIfNotExists Flag to specify behavior when the given database does not exist: if
+     *     set to false, throw an exception, if set to true, do nothing.
+     * @throws DatabaseNotExistException if the given database does not exist
+     * @throws CatalogException in case of any runtime exception
+     */
+    public void alterDatabase(
+            String catalogName,
+            String databaseName,
+            CatalogDatabase newDatabase,
+            boolean ignoreIfNotExists)
+            throws DatabaseNotExistException, CatalogException {
+        Catalog catalog = getCatalogOrError(catalogName);
+        catalog.alterDatabase(databaseName, newDatabase, ignoreIfNotExists);
     }
 }

@@ -28,6 +28,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.sql.SQLWarning;
 
 /** Statement for flink jdbc driver. Notice that the statement is not thread safe. */
 @NotThreadSafe
@@ -35,6 +36,7 @@ public class FlinkStatement extends BaseStatement {
     private final FlinkConnection connection;
     private final Executor executor;
     private FlinkResultSet currentResults;
+    private boolean hasResults;
     private boolean closed;
 
     public FlinkStatement(FlinkConnection connection) {
@@ -58,6 +60,7 @@ public class FlinkStatement extends BaseStatement {
             throw new SQLException(String.format("Statement[%s] is not a query.", sql));
         }
         currentResults = new FlinkResultSet(this, result);
+        hasResults = true;
 
         return currentResults;
     }
@@ -87,6 +90,18 @@ public class FlinkStatement extends BaseStatement {
         clearCurrentResults();
     }
 
+    // TODO We currently do not support this, but we can't throw a SQLException here because we want
+    // to support jdbc tools such as beeline and sqlline.
+    @Override
+    public SQLWarning getWarnings() throws SQLException {
+        return null;
+    }
+
+    // TODO We currently do not support this, but we can't throw a SQLException here because we want
+    // to support jdbc tools such as beeline and sqlline.
+    @Override
+    public void clearWarnings() throws SQLException {}
+
     private void checkClosed() throws SQLException {
         if (closed) {
             throw new SQLException("This result set is already closed");
@@ -106,9 +121,11 @@ public class FlinkStatement extends BaseStatement {
         StatementResult result = executeInternal(sql);
         if (result.isQueryResult() || result.getResultKind() == ResultKind.SUCCESS_WITH_CONTENT) {
             currentResults = new FlinkResultSet(this, result);
+            hasResults = true;
             return true;
         }
 
+        hasResults = false;
         return false;
     }
 
@@ -143,6 +160,16 @@ public class FlinkStatement extends BaseStatement {
         }
 
         throw new SQLFeatureNotSupportedException("Multiple open results not supported");
+    }
+
+    @Override
+    public int getUpdateCount() throws SQLException {
+        if (hasResults) {
+            throw new SQLFeatureNotSupportedException(
+                    "FlinkStatement#getUpdateCount is not supported for query");
+        } else {
+            return 0;
+        }
     }
 
     @Override

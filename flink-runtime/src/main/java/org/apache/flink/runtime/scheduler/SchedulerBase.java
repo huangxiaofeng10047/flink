@@ -39,6 +39,7 @@ import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.CheckpointRecoveryFactory;
 import org.apache.flink.runtime.checkpoint.CheckpointScheduling;
+import org.apache.flink.runtime.checkpoint.CheckpointStatsSnapshot;
 import org.apache.flink.runtime.checkpoint.CheckpointsCleaner;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpoint;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpointStore;
@@ -65,6 +66,7 @@ import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.JobType;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
@@ -165,6 +167,8 @@ public abstract class SchedulerBase implements SchedulerNG, CheckpointScheduling
 
     private final DeploymentStateTimeMetrics deploymentStateTimeMetrics;
 
+    private final VertexEndOfDataListener vertexEndOfDataListener;
+
     public SchedulerBase(
             final Logger log,
             final JobGraph jobGraph,
@@ -236,6 +240,8 @@ public abstract class SchedulerBase implements SchedulerNG, CheckpointScheduling
         this.exceptionHistory =
                 new BoundedFIFOQueue<>(
                         jobMasterConfiguration.getInteger(WebOptions.MAX_EXCEPTION_HISTORY_SIZE));
+
+        this.vertexEndOfDataListener = new VertexEndOfDataListener(executionGraph);
     }
 
     private void shutDownCheckpointServices(JobStatus jobStatus) {
@@ -795,6 +801,12 @@ public abstract class SchedulerBase implements SchedulerNG, CheckpointScheduling
     }
 
     @Override
+    public CheckpointStatsSnapshot requestCheckpointStats() {
+        mainThreadExecutor.assertRunningInMainThread();
+        return executionGraph.getCheckpointStatsSnapshot();
+    }
+
+    @Override
     public JobStatus requestJobStatus() {
         return executionGraph.getState();
     }
@@ -1056,6 +1068,20 @@ public abstract class SchedulerBase implements SchedulerNG, CheckpointScheduling
 
         return operatorCoordinatorHandler.deliverCoordinationRequestToCoordinator(
                 operator, request);
+    }
+
+    @Override
+    public void notifyEndOfData(ExecutionAttemptID executionAttemptID) {
+        if (jobGraph.getJobType() == JobType.STREAMING
+                && jobGraph.isCheckpointingEnabled()
+                && jobGraph.getCheckpointingSettings()
+                        .getCheckpointCoordinatorConfiguration()
+                        .isEnableCheckpointsAfterTasksFinish()) {
+            vertexEndOfDataListener.recordTaskEndOfData(executionAttemptID);
+            if (vertexEndOfDataListener.areAllTasksEndOfData()) {
+                triggerCheckpoint(CheckpointType.CONFIGURED);
+            }
+        }
     }
 
     // ------------------------------------------------------------------------

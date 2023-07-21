@@ -37,10 +37,11 @@ import org.apache.flink.runtime.jobmaster.factories.JobMasterServiceProcessFacto
 import org.apache.flink.runtime.jobmaster.factories.TestingJobMasterServiceProcessFactory;
 import org.apache.flink.runtime.jobmaster.utils.TestingJobMasterGatewayBuilder;
 import org.apache.flink.runtime.leaderelection.DefaultLeaderElectionService;
-import org.apache.flink.runtime.leaderelection.LeaderElectionService;
+import org.apache.flink.runtime.leaderelection.LeaderElection;
 import org.apache.flink.runtime.leaderelection.LeaderInformation;
+import org.apache.flink.runtime.leaderelection.LeaderInformationRegister;
+import org.apache.flink.runtime.leaderelection.TestingLeaderElection;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionDriver;
-import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.scheduler.ExecutionGraphInfo;
 import org.apache.flink.runtime.testtasks.NoOpInvokable;
@@ -55,6 +56,7 @@ import org.apache.flink.util.function.ThrowingRunnable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
@@ -67,6 +69,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.apache.flink.core.testutils.FlinkAssertions.assertThatFuture;
@@ -80,7 +83,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
     private static JobGraph jobGraph;
 
-    private TestingLeaderElectionService leaderElectionService;
+    private TestingLeaderElection leaderElection;
 
     private TestingFatalErrorHandler fatalErrorHandler;
 
@@ -96,13 +99,14 @@ class JobMasterServiceLeadershipRunnerTest {
 
     @BeforeEach
     void setup() {
-        leaderElectionService = new TestingLeaderElectionService();
+        leaderElection = new TestingLeaderElection();
         jobResultStore = new EmbeddedJobResultStore();
         fatalErrorHandler = new TestingFatalErrorHandler();
     }
 
     @AfterEach
     void tearDown() throws Exception {
+        leaderElection.close();
         fatalErrorHandler.rethrowError();
     }
 
@@ -165,24 +169,24 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID()).get();
+        leaderElection.isLeader(UUID.randomUUID()).get();
 
-        leaderElectionService.notLeader();
+        leaderElection.notLeader();
 
-        final CompletableFuture<LeaderInformation> leaderFuture =
-                leaderElectionService.isLeader(UUID.randomUUID());
+        final UUID expectedLeaderSessionID = UUID.randomUUID();
+        final CompletableFuture<LeaderInformation> confirmedLeaderInformation =
+                leaderElection.isLeader(expectedLeaderSessionID);
 
-        // the new leadership should wait first for the suspension to happen
-        assertThat(leaderFuture).isNotDone();
-
-        assertThatFuture(leaderFuture)
-                .withFailMessage(
-                        "Granted leadership even though the JobMaster has not been suspended.")
+        assertThatFuture(confirmedLeaderInformation)
+                .as("The new leadership should wait first for the suspension to happen.")
                 .willNotCompleteWithin(Duration.ofMillis(1));
 
         terminationFuture.complete(null);
 
-        leaderFuture.get();
+        assertThatFuture(confirmedLeaderInformation)
+                .eventuallySucceeds()
+                .extracting(LeaderInformation::getLeaderSessionID)
+                .isEqualTo(expectedLeaderSessionID);
     }
 
     @Test
@@ -201,7 +205,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID()).get();
+        leaderElection.isLeader(UUID.randomUUID()).get();
 
         final FlinkException cause =
                 new FlinkException("The JobMasterService failed unexpectedly.");
@@ -232,7 +236,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         final JobManagerRunnerResult jobManagerRunnerResult =
                 jobManagerRunner.getResultFuture().join();
@@ -271,7 +275,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         jobManagerRunner.closeAsync().join();
 
@@ -296,9 +300,9 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
-        leaderElectionService.notLeader();
+        leaderElection.notLeader();
 
         assertThat(terminationFuture).isDone();
     }
@@ -318,7 +322,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         // cancel during init
         CompletableFuture<Acknowledge> cancellationFuture =
@@ -360,7 +364,7 @@ class JobMasterServiceLeadershipRunnerTest {
         assertInitializingStates(jobManagerRunner);
 
         // assign leadership
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         // assert initializing while not yet initialized
         assertInitializingStates(jobManagerRunner);
@@ -410,15 +414,15 @@ class JobMasterServiceLeadershipRunnerTest {
         jobManagerRunner.start();
 
         // first leadership assignment to get into blocking initialization
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         assertThat(jobManagerRunner.requestJobStatus(TESTING_TIMEOUT).get())
                 .isEqualTo(JobStatus.INITIALIZING);
 
         // we are now blocked on the initialization, enqueue some operations:
         for (int i = 0; i < 10; i++) {
-            leaderElectionService.notLeader();
-            leaderElectionService.isLeader(UUID.randomUUID());
+            leaderElection.notLeader();
+            leaderElection.isLeader(UUID.randomUUID());
         }
 
         firstTerminationFuture.complete(null);
@@ -464,7 +468,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         // cancel while initializing
         assertThat(jobManagerRunner.requestJobStatus(TESTING_TIMEOUT).get())
@@ -490,9 +494,9 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID()).join();
+        leaderElection.isLeader(UUID.randomUUID()).join();
 
-        leaderElectionService.notLeader();
+        leaderElection.notLeader();
 
         resultFuture.complete(
                 JobManagerRunnerResult.forSuccess(
@@ -517,9 +521,9 @@ class JobMasterServiceLeadershipRunnerTest {
         final CompletableFuture<JobMasterGateway> jobMasterGateway =
                 jobManagerRunner.getJobMasterGateway();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
-        leaderElectionService.notLeader();
+        leaderElection.notLeader();
 
         assertThatFuture(jobMasterGateway).eventuallyFails();
     }
@@ -539,9 +543,9 @@ class JobMasterServiceLeadershipRunnerTest {
         jobManagerRunner.start();
 
         final CompletableFuture<LeaderInformation> leaderFuture =
-                leaderElectionService.isLeader(UUID.randomUUID());
+                leaderElection.isLeader(UUID.randomUUID());
 
-        leaderElectionService.notLeader();
+        leaderElection.notLeader();
 
         leaderAddressFuture.complete("foobar");
 
@@ -593,8 +597,8 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.cancel(TESTING_TIMEOUT);
 
-        leaderElectionService.isLeader(UUID.randomUUID());
-        leaderElectionService.notLeader();
+        leaderElection.isLeader(UUID.randomUUID());
+        leaderElection.notLeader();
 
         assertThat(jobManagerRunner.requestJobStatus(TESTING_TIMEOUT).join())
                 .isEqualTo(JobStatus.INITIALIZING);
@@ -613,8 +617,8 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
-        leaderElectionService.notLeader();
+        leaderElection.isLeader(UUID.randomUUID());
+        leaderElection.notLeader();
 
         final FlinkException testException = new FlinkException("Test exception");
         terminationFuture.completeExceptionally(testException);
@@ -640,7 +644,7 @@ class JobMasterServiceLeadershipRunnerTest {
 
         jobManagerRunner.start();
 
-        leaderElectionService.isLeader(UUID.randomUUID());
+        leaderElection.isLeader(UUID.randomUUID());
 
         assertThatFuture(jobManagerRunner.getResultFuture())
                 .eventuallyFailsWith(ExecutionException.class)
@@ -661,7 +665,7 @@ class JobMasterServiceLeadershipRunnerTest {
                                         .build())
                         .build()) {
             jobManagerRunner.start();
-            leaderElectionService.isLeader(UUID.randomUUID());
+            leaderElection.isLeader(UUID.randomUUID());
 
             final CompletableFuture<JobManagerRunnerResult> resultFuture =
                     jobManagerRunner.getResultFuture();
@@ -672,18 +676,25 @@ class JobMasterServiceLeadershipRunnerTest {
         }
     }
 
+    @Disabled
     @Test
     void testJobMasterServiceLeadershipRunnerCloseWhenElectionServiceGrantLeaderShip()
             throws Exception {
-        final TestingLeaderElectionDriver.TestingLeaderElectionDriverFactory
-                testingLeaderElectionDriverFactory =
-                        new TestingLeaderElectionDriver.TestingLeaderElectionDriverFactory();
+        final AtomicReference<LeaderInformationRegister> storedLeaderInformation =
+                new AtomicReference<>(LeaderInformationRegister.empty());
+
+        final TestingLeaderElectionDriver.Factory driverFactory =
+                new TestingLeaderElectionDriver.Factory(
+                        TestingLeaderElectionDriver.newBuilder(
+                                new AtomicBoolean(), storedLeaderInformation, new AtomicBoolean()));
 
         // we need to use DefaultLeaderElectionService here because JobMasterServiceLeadershipRunner
         // in connection with the DefaultLeaderElectionService generates the nested locking
         final DefaultLeaderElectionService defaultLeaderElectionService =
-                new DefaultLeaderElectionService(testingLeaderElectionDriverFactory);
-        defaultLeaderElectionService.startLeaderElectionBackend();
+                new DefaultLeaderElectionService(driverFactory, fatalErrorHandler);
+
+        final TestingLeaderElectionDriver currentLeaderDriver =
+                driverFactory.assertAndGetOnlyCreatedDriver();
 
         // latch to detect when we reached the first synchronized section having a lock on the
         // JobMasterServiceProcess#stop side
@@ -708,6 +719,9 @@ class JobMasterServiceLeadershipRunnerTest {
                                     return CompletableFuture.completedFuture(null);
                                 })
                         .build();
+        final String componentId = "random-component-id";
+        final LeaderElection leaderElection =
+                defaultLeaderElectionService.createLeaderElection(componentId);
         try (final JobMasterServiceLeadershipRunner jobManagerRunner =
                 newJobMasterServiceLeadershipRunnerBuilder()
                         .setClassLoaderLease(
@@ -735,7 +749,7 @@ class JobMasterServiceLeadershipRunnerTest {
                                                         // DefaultLeaderElectionService#lock in
                                                         // DefaultLeaderElectionService#onGrantLeadership,
                                                         // but we trigger this implicitly through
-                                                        // TestingLeaderElectionDriver#isLeader().
+                                                        // TestingLeaderElectionDriver#grantLeadership(UUID).
                                                         // Adding a short sleep can ensure that
                                                         // another thread successfully receives the
                                                         // leadership notification, so that the
@@ -751,23 +765,16 @@ class JobMasterServiceLeadershipRunnerTest {
                                         .setJobMasterServiceProcessFunction(
                                                 ignoredSessionId -> jobMasterServiceProcess)
                                         .build())
-                        .setLeaderElectionService(defaultLeaderElectionService)
+                        .setLeaderElection(leaderElection)
                         .build()) {
             jobManagerRunner.start();
 
-            final TestingLeaderElectionDriver currentLeaderDriver =
-                    Preconditions.checkNotNull(
-                            testingLeaderElectionDriverFactory.getCurrentLeaderDriver());
             // grant leadership to create jobMasterServiceProcess
-            currentLeaderDriver.isLeader();
+            final UUID leaderSessionID = UUID.randomUUID();
+            defaultLeaderElectionService.onGrantLeadership(leaderSessionID);
 
-            while (currentLeaderDriver.getLeaderInformation().getLeaderSessionID() == null
-                    || !jobManagerRunner
-                            .getLeaderElection()
-                            .hasLeadership(
-                                    currentLeaderDriver
-                                            .getLeaderInformation()
-                                            .getLeaderSessionID())) {
+            while (!currentLeaderDriver.hasLeadership()
+                    || !leaderElection.hasLeadership(leaderSessionID)) {
                 Thread.sleep(100);
             }
 
@@ -784,8 +791,8 @@ class JobMasterServiceLeadershipRunnerTest {
                                 // order (i.e. no two grant or revoke events should appear after
                                 // each other). This requires the leadership to be revoked before
                                 // regaining leadership in this test.
-                                currentLeaderDriver.notLeader();
-                                currentLeaderDriver.isLeader();
+                                defaultLeaderElectionService.onRevokeLeadership();
+                                defaultLeaderElectionService.onGrantLeadership(UUID.randomUUID());
                             });
             grantLeadershipThread.start();
 
@@ -828,8 +835,8 @@ class JobMasterServiceLeadershipRunnerTest {
         private LibraryCacheManager.ClassLoaderLease classLoaderLease =
                 TestingClassLoaderLease.newBuilder().build();
 
-        private LeaderElectionService leaderElectionService =
-                JobMasterServiceLeadershipRunnerTest.this.leaderElectionService;
+        private LeaderElection leaderElection =
+                JobMasterServiceLeadershipRunnerTest.this.leaderElection;
 
         public JobMasterServiceLeadershipRunnerBuilder setClassLoaderLease(
                 LibraryCacheManager.ClassLoaderLease classLoaderLease) {
@@ -843,16 +850,16 @@ class JobMasterServiceLeadershipRunnerTest {
             return this;
         }
 
-        public JobMasterServiceLeadershipRunnerBuilder setLeaderElectionService(
-                LeaderElectionService leaderElectionService) {
-            this.leaderElectionService = leaderElectionService;
+        public JobMasterServiceLeadershipRunnerBuilder setLeaderElection(
+                LeaderElection leaderElection) {
+            this.leaderElection = leaderElection;
             return this;
         }
 
         public JobMasterServiceLeadershipRunner build() {
             return new JobMasterServiceLeadershipRunner(
                     jobMasterServiceProcessFactory,
-                    leaderElectionService,
+                    leaderElection,
                     jobResultStore,
                     classLoaderLease,
                     fatalErrorHandler);

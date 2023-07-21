@@ -39,6 +39,7 @@ import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.CheckpointRecoveryFactory;
 import org.apache.flink.runtime.checkpoint.CheckpointScheduling;
+import org.apache.flink.runtime.checkpoint.CheckpointStatsSnapshot;
 import org.apache.flink.runtime.checkpoint.CheckpointsCleaner;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpoint;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpointStore;
@@ -594,6 +595,11 @@ public class AdaptiveScheduler
     }
 
     @Override
+    public CheckpointStatsSnapshot requestCheckpointStats() {
+        return state.getJob().getCheckpointStatsSnapshot();
+    }
+
+    @Override
     public void archiveFailure(RootExceptionHistoryEntry failure) {
         exceptionHistory.add(failure);
     }
@@ -717,6 +723,15 @@ public class AdaptiveScheduler
     }
 
     @Override
+    public void notifyEndOfData(ExecutionAttemptID executionAttemptID) {
+        state.tryRun(
+                StateWithExecutionGraph.class,
+                stateWithExecutionGraph ->
+                        stateWithExecutionGraph.notifyEndOfData(executionAttemptID),
+                "notifyEndOfData");
+    }
+
+    @Override
     public void reportCheckpointMetrics(
             JobID jobID,
             ExecutionAttemptID executionAttemptID,
@@ -789,7 +804,8 @@ public class AdaptiveScheduler
     public JobResourceRequirements requestJobResourceRequirements() {
         final JobResourceRequirements.Builder builder = JobResourceRequirements.newBuilder();
         for (JobInformation.VertexInformation vertex : jobInformation.getVertices()) {
-            builder.setParallelismForJobVertex(vertex.getJobVertexID(), 1, vertex.getParallelism());
+            builder.setParallelismForJobVertex(
+                    vertex.getJobVertexID(), vertex.getMinParallelism(), vertex.getParallelism());
         }
         return builder.build();
     }

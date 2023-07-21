@@ -26,6 +26,7 @@ import org.apache.flink.core.execution.CheckpointType;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.blocklist.BlocklistListener;
 import org.apache.flink.runtime.checkpoint.CheckpointCoordinatorGateway;
+import org.apache.flink.runtime.checkpoint.CheckpointStatsSnapshot;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpoint;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
@@ -207,6 +208,14 @@ public interface JobMasterGateway
     CompletableFuture<ExecutionGraphInfo> requestJob(@RpcTimeout Time timeout);
 
     /**
+     * Requests the {@link CheckpointStatsSnapshot} of the job.
+     *
+     * @param timeout for the rpc call
+     * @return Future which is completed with the {@link CheckpointStatsSnapshot} of the job
+     */
+    CompletableFuture<CheckpointStatsSnapshot> requestCheckpointStats(@RpcTimeout Time timeout);
+
+    /**
      * Triggers taking a savepoint of the executed job.
      *
      * @param targetDirectory to which to write the savepoint data or null if the default savepoint
@@ -316,4 +325,11 @@ public interface JobMasterGateway
      */
     CompletableFuture<Acknowledge> updateJobResourceRequirements(
             JobResourceRequirements jobResourceRequirements);
+
+    /**
+     * Notifies that the task has reached the end of data.
+     *
+     * @param executionAttempt The execution attempt id.
+     */
+    void notifyEndOfData(final ExecutionAttemptID executionAttempt);
 }

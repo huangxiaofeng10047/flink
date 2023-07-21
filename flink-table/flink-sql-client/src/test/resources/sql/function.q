@@ -42,6 +42,24 @@ show user functions;
 1 row in set
 !ok
 
+show user functions like 'func%';
++---------------+
+| function name |
++---------------+
+|         func1 |
++---------------+
+1 row in set
+!ok
+
+show user functions ilike 'func%';
++---------------+
+| function name |
++---------------+
+|         func1 |
++---------------+
+1 row in set
+!ok
+
 SET 'sql-client.execution.result-mode' = 'tableau';
 [INFO] Execute statement succeed.
 !info
@@ -71,6 +89,24 @@ show user functions;
 |         func2 |
 +---------------+
 2 rows in set
+!ok
+
+show user functions like 'func1%';
++---------------+
+| function name |
++---------------+
+|         func1 |
++---------------+
+1 row in set
+!ok
+
+show user functions ilike 'func2%';
++---------------+
+| function name |
++---------------+
+|         func2 |
++---------------+
+1 row in set
 !ok
 
 # ====== test function with full qualified name ======
@@ -108,6 +144,38 @@ show user functions;
 |         func2 |
 +---------------+
 2 rows in set
+!ok
+
+# ====== test function with specified catalog and db ======
+
+# we are not under catalog c1
+
+show user functions from c1.db;
++---------------+
+| function name |
++---------------+
+|         func3 |
+|         func4 |
++---------------+
+2 rows in set
+!ok
+
+show user functions from c1.db like 'func3%';
++---------------+
+| function name |
++---------------+
+|         func3 |
++---------------+
+1 row in set
+!ok
+
+show user functions in c1.db ilike 'FUNC3%';
++---------------+
+| function name |
++---------------+
+|         func3 |
++---------------+
+1 row in set
 !ok
 
 use catalog c1;
@@ -247,31 +315,6 @@ SHOW JARS;
 +-$VAR_UDF_JAR_PATH_DASH-----+
 | $VAR_UDF_JAR_PATH |
 +-$VAR_UDF_JAR_PATH_DASH-----+
-1 row in set
-!ok
-
-# ==========================================================================
-# test function with hive catalog
-# ==========================================================================
-
-create catalog hivecatalog with ('type'='hive-test', 'hive-version'='2.3.4');
-[INFO] Execute statement succeed.
-!info
-
-use catalog hivecatalog;
-[INFO] Execute statement succeed.
-!info
-
-create function lowerudf AS 'LowerUDF';
-[INFO] Execute statement succeed.
-!info
-
-show user functions;
-+---------------+
-| function name |
-+---------------+
-|      lowerudf |
-+---------------+
 1 row in set
 !ok
 

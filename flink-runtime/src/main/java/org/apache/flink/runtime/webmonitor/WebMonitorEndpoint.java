@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.webmonitor;
 
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.AkkaOptions;
@@ -25,9 +26,9 @@ import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.runtime.blob.TransientBlobService;
+import org.apache.flink.runtime.checkpoint.CheckpointStatsSnapshot;
 import org.apache.flink.runtime.leaderelection.LeaderContender;
 import org.apache.flink.runtime.leaderelection.LeaderElection;
-import org.apache.flink.runtime.leaderelection.LeaderElectionService;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
 import org.apache.flink.runtime.rest.RestServerEndpoint;
 import org.apache.flink.runtime.rest.handler.AbstractRestHandler;
@@ -153,10 +154,9 @@ import org.apache.flink.runtime.scheduler.ExecutionGraphInfo;
 import org.apache.flink.runtime.webmonitor.history.ArchivedJson;
 import org.apache.flink.runtime.webmonitor.history.JsonArchivist;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
-import org.apache.flink.runtime.webmonitor.threadinfo.JobVertexThreadInfoTracker;
-import org.apache.flink.runtime.webmonitor.threadinfo.JobVertexThreadInfoTrackerBuilder;
 import org.apache.flink.runtime.webmonitor.threadinfo.ThreadInfoRequestCoordinator;
-import org.apache.flink.runtime.webmonitor.threadinfo.VertexThreadInfoStats;
+import org.apache.flink.runtime.webmonitor.threadinfo.VertexThreadInfoTracker;
+import org.apache.flink.runtime.webmonitor.threadinfo.VertexThreadInfoTrackerBuilder;
 import org.apache.flink.util.ConfigurationException;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.ExecutorUtils;
@@ -165,6 +165,8 @@ import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 import org.apache.flink.util.concurrent.FutureUtils;
 
+import org.apache.flink.shaded.guava31.com.google.common.cache.Cache;
+import org.apache.flink.shaded.guava31.com.google.common.cache.CacheBuilder;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInboundHandler;
 
 import javax.annotation.Nullable;
@@ -183,7 +185,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 /**
  * Rest endpoint which serves the web frontend REST calls.
@@ -202,11 +203,12 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
 
     private final ExecutionGraphCache executionGraphCache;
     private final CheckpointStatsCache checkpointStatsCache;
+    private final Cache<JobID, CompletableFuture<CheckpointStatsSnapshot>>
+            checkpointStatsSnapshotCache;
 
     private final MetricFetcher metricFetcher;
 
-    private final LeaderElectionService leaderElectionService;
-    private LeaderElection leaderElection;
+    private final LeaderElection leaderElection;
 
     private final FatalErrorHandler fatalErrorHandler;
 
@@ -224,7 +226,7 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
             TransientBlobService transientBlobService,
             ScheduledExecutorService executor,
             MetricFetcher metricFetcher,
-            LeaderElectionService leaderElectionService,
+            LeaderElection leaderElection,
             ExecutionGraphCache executionGraphCache,
             FatalErrorHandler fatalErrorHandler)
             throws IOException, ConfigurationException {
@@ -239,16 +241,20 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
         this.executionGraphCache = executionGraphCache;
 
         this.checkpointStatsCache =
-                new CheckpointStatsCache(restConfiguration.getMaxCheckpointStatisticCacheEntries());
+                new CheckpointStatsCache(restConfiguration.getCheckpointHistorySize());
+        this.checkpointStatsSnapshotCache =
+                CacheBuilder.newBuilder()
+                        .maximumSize(restConfiguration.getCheckpointCacheSize())
+                        .expireAfterWrite(restConfiguration.getCheckpointCacheExpireAfterWrite())
+                        .build();
 
         this.metricFetcher = metricFetcher;
 
-        this.leaderElectionService = Preconditions.checkNotNull(leaderElectionService);
+        this.leaderElection = Preconditions.checkNotNull(leaderElection);
         this.fatalErrorHandler = Preconditions.checkNotNull(fatalErrorHandler);
     }
 
-    private JobVertexThreadInfoTracker<VertexThreadInfoStats> initializeThreadInfoTracker(
-            ScheduledExecutorService executor) {
+    private VertexThreadInfoTracker initializeThreadInfoTracker(ScheduledExecutorService executor) {
         final Duration akkaTimeout = clusterConfiguration.get(AkkaOptions.ASK_TIMEOUT_DURATION);
 
         final Duration flameGraphCleanUpInterval =
@@ -256,11 +262,8 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
         final ThreadInfoRequestCoordinator threadInfoRequestCoordinator =
                 new ThreadInfoRequestCoordinator(executor, akkaTimeout);
 
-        return JobVertexThreadInfoTrackerBuilder.newBuilder(
-                        resourceManagerRetriever,
-                        Function.identity(),
-                        executor,
-                        restConfiguration.getTimeout())
+        return VertexThreadInfoTrackerBuilder.newBuilder(
+                        resourceManagerRetriever, executor, restConfiguration.getTimeout())
                 .setCoordinator(threadInfoRequestCoordinator)
                 .setCleanUpInterval(flameGraphCleanUpInterval)
                 .setNumSamples(clusterConfiguration.getInteger(RestOptions.FLAMEGRAPH_NUM_SAMPLES))
@@ -380,7 +383,7 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
                         timeout,
                         responseHeaders,
                         CheckpointingStatisticsHeaders.getInstance(),
-                        executionGraphCache,
+                        checkpointStatsSnapshotCache,
                         executor);
 
         CheckpointStatisticDetailsHandler checkpointStatisticDetailsHandler =
@@ -389,8 +392,8 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
                         timeout,
                         responseHeaders,
                         CheckpointStatisticDetailsHeaders.getInstance(),
-                        executionGraphCache,
                         executor,
+                        checkpointStatsSnapshotCache,
                         checkpointStatsCache);
 
         JobPlanHandler jobPlanHandler =
@@ -408,8 +411,8 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
                         timeout,
                         responseHeaders,
                         TaskCheckpointStatisticsHeaders.getInstance(),
-                        executionGraphCache,
                         executor,
+                        checkpointStatsSnapshotCache,
                         checkpointStatsCache);
 
         JobExceptionsHandler jobExceptionsHandler =
@@ -1046,7 +1049,6 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
 
     @Override
     public void startInternal() throws Exception {
-        leaderElection = leaderElectionService.createLeaderElection();
         leaderElection.startLeaderElection(this);
 
         startExecutionGraphCacheCleanupTask();
@@ -1122,11 +1124,6 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
     @Override
     public void revokeLeadership() {
         log.info("{} lost leadership", getRestBaseUrl());
-    }
-
-    @Override
-    public String getDescription() {
-        return getRestBaseUrl();
     }
 
     @Override

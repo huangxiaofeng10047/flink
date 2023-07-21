@@ -148,9 +148,9 @@ public abstract class YarnTestBase {
         // very specific on purpose; whitelist meaningless exceptions that occur during akka
         // shutdown:
         Pattern.compile(
-                "Remote connection to \\[null\\] failed with java.net.ConnectException: Connection refused"),
+                "Remote connection to \\[.*\\] failed with java.net.ConnectException: Connection refused"),
         Pattern.compile(
-                "Remote connection to \\[null\\] failed with java.nio.channels.NotYetConnectedException"),
+                "Remote connection to \\[.*\\] failed with java.nio.channels.NotYetConnectedException"),
         Pattern.compile("java\\.io\\.IOException: Connection reset by peer"),
         Pattern.compile(
                 "Association with remote system \\[akka.tcp://flink@[^]]+\\] has failed, address is now gated for \\[50\\] ms. Reason: \\[Association failed with \\[akka.tcp://flink@[^]]+\\]\\] Caused by: \\[java.net.ConnectException: Connection refused: [^]]+\\]"),
@@ -158,7 +158,7 @@ public abstract class YarnTestBase {
         // filter out expected ResourceManagerException caused by intended shutdown request
         Pattern.compile(YarnResourceManagerDriver.ERROR_MESSAGE_ON_SHUTDOWN_REQUEST),
 
-        // this can happen in Akka 2.4 on shutdown.
+        // this can happen in Akka on shutdown.
         Pattern.compile(
                 "java\\.util\\.concurrent\\.RejectedExecutionException: Worker has already been shutdown"),
         Pattern.compile("org\\.apache\\.flink.util\\.FlinkException: Stopping JobMaster"),
@@ -167,6 +167,8 @@ public abstract class YarnTestBase {
         Pattern.compile("lost the leadership."),
         Pattern.compile(
                 "akka.remote.transport.netty.NettyTransport.*Remote connection to \\[[^]]+\\] failed with java.io.IOException: Broken pipe"),
+        Pattern.compile(
+                "akka.remote.transport.netty.NettyTransport.*Remote connection to \\[.+\\] failed with java.net.SocketException: Connection reset"),
 
         // this can happen during cluster shutdown, if AMRMClient happens to be heartbeating
         Pattern.compile("Exception on heartbeat"),
