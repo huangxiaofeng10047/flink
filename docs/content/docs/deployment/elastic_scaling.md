@@ -135,17 +135,15 @@ One benefit of the Adaptive Scheduler over the default scheduler is that it can 
 
 ### Usage
 
-The following configuration parameters need to be set:
+The following configuration parameter need to be set:
 
 - `jobmanager.scheduler: adaptive`: Change from the default scheduler to adaptive scheduler
-- `cluster.declarative-resource-management.enabled` Declarative resource management must be enabled (enabled by default).
 
 The behavior of Adaptive Scheduler is configured by [all configuration options containing `adaptive-scheduler`]({{< ref "docs/deployment/config">}}#advanced-scheduling-options) in their name.
 
 ### Limitations
 
-- **Streaming jobs only**: The first version of Adaptive Scheduler runs with streaming jobs only. When submitting a batch job, we will automatically fall back to the default scheduler.
-- **No support for [local recovery]({{< ref "docs/ops/state/large_state_tuning">}}#task-local-recovery)**: Local recovery is a feature that schedules tasks to machines so that the state on that machine gets re-used if possible. The lack of this feature means that Adaptive Scheduler will always need to download the entire state from the checkpoint storage.
+- **Streaming jobs only**: The Adaptive Scheduler runs with streaming jobs only. When submitting a batch job, Flink will use the default scheduler of batch jobs, i.e. Adaptive Batch Scheduler.
 - **No support for partial failover**: Partial failover means that the scheduler is able to restart parts ("regions" in Flink's internals) of a failed job, instead of the entire job. This limitation impacts only recovery time of embarrassingly parallel jobs: Flink's default scheduler can restart failed parts, while Adaptive Scheduler will restart the entire job.
 - Scaling events trigger job and task restarts, which will increase the number of Task attempts.
 

@@ -32,13 +32,15 @@ import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
 import org.apache.flink.runtime.util.DualKeyLinkedMap;
 import org.apache.flink.util.FlinkException;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -72,48 +74,79 @@ public class SimpleExecutionSlotAllocator implements ExecutionSlotAllocator {
     }
 
     @Override
-    public List<ExecutionSlotAssignment> allocateSlotsFor(
+    public Map<ExecutionAttemptID, ExecutionSlotAssignment> allocateSlotsFor(
             List<ExecutionAttemptID> executionAttemptIds) {
-        return executionAttemptIds.stream()
-                .map(id -> new ExecutionSlotAssignment(id, allocateSlotFor(id)))
-                .collect(Collectors.toList());
+        Map<ExecutionAttemptID, ExecutionSlotAssignment> result = new HashMap<>();
+
+        Map<SlotRequestId, ExecutionAttemptID> remainingExecutionsToSlotRequest =
+                new HashMap<>(executionAttemptIds.size());
+        List<PhysicalSlotRequest> physicalSlotRequests =
+                new ArrayList<>(executionAttemptIds.size());
+
+        for (ExecutionAttemptID executionAttemptId : executionAttemptIds) {
+            if (requestedPhysicalSlots.containsKeyA(executionAttemptId)) {
+                result.put(
+                        executionAttemptId,
+                        new ExecutionSlotAssignment(
+                                executionAttemptId,
+                                requestedPhysicalSlots.getValueByKeyA(executionAttemptId)));
+            } else {
+                final SlotRequestId slotRequestId = new SlotRequestId();
+                final ResourceProfile resourceProfile =
+                        resourceProfileRetriever.apply(executionAttemptId);
+                Collection<TaskManagerLocation> preferredLocations =
+                        preferredLocationsRetriever.getPreferredLocations(
+                                executionAttemptId.getExecutionVertexId(), Collections.emptySet());
+                final SlotProfile slotProfile =
+                        SlotProfile.priorAllocation(
+                                resourceProfile,
+                                resourceProfile,
+                                preferredLocations,
+                                Collections.emptyList(),
+                                Collections.emptySet());
+                final PhysicalSlotRequest request =
+                        new PhysicalSlotRequest(
+                                slotRequestId, slotProfile, slotWillBeOccupiedIndefinitely);
+                physicalSlotRequests.add(request);
+                remainingExecutionsToSlotRequest.put(slotRequestId, executionAttemptId);
+            }
+        }
+
+        result.putAll(
+                allocatePhysicalSlotsFor(remainingExecutionsToSlotRequest, physicalSlotRequests));
+        return result;
     }
 
-    private CompletableFuture<LogicalSlot> allocateSlotFor(ExecutionAttemptID executionAttemptId) {
-        if (requestedPhysicalSlots.containsKeyA(executionAttemptId)) {
-            return requestedPhysicalSlots.getValueByKeyA(executionAttemptId);
-        }
-        final SlotRequestId slotRequestId = new SlotRequestId();
-        final ResourceProfile resourceProfile = resourceProfileRetriever.apply(executionAttemptId);
-        Collection<TaskManagerLocation> preferredLocations =
-                preferredLocationsRetriever.getPreferredLocations(
-                        executionAttemptId.getExecutionVertexId(), Collections.emptySet());
-        final SlotProfile slotProfile =
-                SlotProfile.priorAllocation(
-                        resourceProfile,
-                        resourceProfile,
-                        preferredLocations,
-                        Collections.emptyList(),
-                        Collections.emptySet());
-        final PhysicalSlotRequest request =
-                new PhysicalSlotRequest(slotRequestId, slotProfile, slotWillBeOccupiedIndefinitely);
-        final CompletableFuture<LogicalSlot> slotFuture =
-                slotProvider
-                        .allocatePhysicalSlot(request)
-                        .thenApply(
-                                physicalSlotRequest ->
-                                        allocateLogicalSlotFromPhysicalSlot(
-                                                slotRequestId,
-                                                physicalSlotRequest.getPhysicalSlot(),
-                                                slotWillBeOccupiedIndefinitely));
-        slotFuture.exceptionally(
-                throwable -> {
-                    this.requestedPhysicalSlots.removeKeyA(executionAttemptId);
-                    this.slotProvider.cancelSlotRequest(slotRequestId, throwable);
-                    return null;
+    private Map<ExecutionAttemptID, ExecutionSlotAssignment> allocatePhysicalSlotsFor(
+            Map<SlotRequestId, ExecutionAttemptID> executionAttemptIds,
+            List<PhysicalSlotRequest> slotRequests) {
+        Map<ExecutionAttemptID, ExecutionSlotAssignment> allocatedSlots = new HashMap<>();
+        Map<SlotRequestId, CompletableFuture<PhysicalSlotRequest.Result>> slotFutures =
+                slotProvider.allocatePhysicalSlots(slotRequests);
+
+        slotFutures.forEach(
+                (slotRequestId, slotRequestResultFuture) -> {
+                    ExecutionAttemptID executionAttemptId = executionAttemptIds.get(slotRequestId);
+
+                    final CompletableFuture<LogicalSlot> slotFuture =
+                            slotRequestResultFuture.thenApply(
+                                    physicalSlotRequest ->
+                                            allocateLogicalSlotFromPhysicalSlot(
+                                                    slotRequestId,
+                                                    physicalSlotRequest.getPhysicalSlot(),
+                                                    slotWillBeOccupiedIndefinitely));
+                    slotFuture.exceptionally(
+                            throwable -> {
+                                this.requestedPhysicalSlots.removeKeyA(executionAttemptId);
+                                this.slotProvider.cancelSlotRequest(slotRequestId, throwable);
+                                return null;
+                            });
+                    requestedPhysicalSlots.put(executionAttemptId, slotRequestId, slotFuture);
+                    allocatedSlots.put(
+                            executionAttemptId,
+                            new ExecutionSlotAssignment(executionAttemptId, slotFuture));
                 });
-        this.requestedPhysicalSlots.put(executionAttemptId, slotRequestId, slotFuture);
-        return slotFuture;
+        return allocatedSlots;
     }
 
     @Override

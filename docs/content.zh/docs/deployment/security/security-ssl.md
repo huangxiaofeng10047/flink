@@ -87,12 +87,6 @@ Examples for proxies that Flink users have deployed are [Envoy Proxy](https://ww
 
 The rationale behind delegating authentication to a proxy is that such proxies offer a wide variety of authentication options and thus better integration into existing infrastructures.
 
-
-### Queryable State
-
-Connections to the queryable state endpoints is currently not authenticated or encrypted.
-
-
 ## Configuring SSL
 
 SSL can be enabled separately for *internal* and *external* connectivity:
@@ -107,7 +101,7 @@ When `security.ssl.internal.enabled` is set to `true`, you can set the following
 
   - `taskmanager.data.ssl.enabled`: Data communication between TaskManagers
   - `blob.service.ssl.enabled`: Transport of BLOBs from JobManager to TaskManager
-  - `akka.ssl.enabled`: Akka-based RPC connections between JobManager / TaskManager / ResourceManager
+  - `pekko.ssl.enabled`: Pekko-based RPC connections between JobManager / TaskManager / ResourceManager
 
 ### Keystores and Truststores
 

@@ -400,6 +400,16 @@ public final class FactoryUtil {
     }
 
     /**
+     * Creates a utility that helps validating options for a {@link CatalogStoreFactory}.
+     *
+     * <p>Note: This utility checks for left-over options in the final step.
+     */
+    public static CatalogStoreFactoryHelper createCatalogStoreFactoryHelper(
+            CatalogStoreFactory factory, CatalogStoreFactory.Context context) {
+        return new CatalogStoreFactoryHelper(factory, context);
+    }
+
+    /**
      * Creates a utility that helps validating options for a {@link ModuleFactory}.
      *
      * <p>Note: This utility checks for left-over options in the final step.
@@ -729,6 +739,17 @@ public final class FactoryUtil {
         }
     }
 
+    /** Returns the {@link DynamicTableFactory} via {@link Catalog}. */
+    public static <T extends DynamicTableFactory> Optional<T> getDynamicTableFactory(
+            Class<T> factoryClass, @Nullable Catalog catalog) {
+        if (catalog == null) {
+            return Optional.empty();
+        }
+
+        return catalog.getFactory()
+                .map(f -> factoryClass.isAssignableFrom(f.getClass()) ? (T) f : null);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Helper methods
     // --------------------------------------------------------------------------------------------
@@ -737,17 +758,6 @@ public final class FactoryUtil {
             Class<T> factoryClass, @Nullable Catalog catalog, DynamicTableFactory.Context context) {
         return getDynamicTableFactory(factoryClass, catalog)
                 .orElseGet(() -> discoverTableFactory(factoryClass, context));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T extends DynamicTableFactory> Optional<T> getDynamicTableFactory(
-            Class<T> factoryClass, @Nullable Catalog catalog) {
-        if (catalog == null) {
-            return Optional.empty();
-        }
-
-        return catalog.getFactory()
-                .map(f -> factoryClass.isAssignableFrom(f.getClass()) ? (T) f : null);
     }
 
     private static <T extends DynamicTableFactory> T discoverTableFactory(
@@ -1024,6 +1034,19 @@ public final class FactoryUtil {
 
         public CatalogFactoryHelper(CatalogFactory catalogFactory, CatalogFactory.Context context) {
             super(catalogFactory, context.getOptions(), PROPERTY_VERSION);
+        }
+    }
+
+    /**
+     * Helper utility for validating all options for a {@link CatalogStoreFactory}.
+     *
+     * @see #createCatalogStoreFactoryHelper(CatalogStoreFactory, CatalogStoreFactory.Context)
+     */
+    @PublicEvolving
+    public static class CatalogStoreFactoryHelper extends FactoryHelper<CatalogStoreFactory> {
+        public CatalogStoreFactoryHelper(
+                CatalogStoreFactory catalogStoreFactory, CatalogStoreFactory.Context context) {
+            super(catalogStoreFactory, context.getOptions(), PROPERTY_VERSION);
         }
     }
 
