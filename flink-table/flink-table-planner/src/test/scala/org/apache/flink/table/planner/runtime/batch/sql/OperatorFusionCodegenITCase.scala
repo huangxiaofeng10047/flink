@@ -157,6 +157,15 @@ class OperatorFusionCodegenITCase extends BatchTestBase {
   }
 
   @TestTemplate
+  def testHashJoinWithOnlyProjection(): Unit = {
+    checkOpFusionCodegenResult("""
+                                 |SELECT * FROM (SELECT a, nx + ny AS nt FROM x
+                                 |  JOIN y ON x.a = y.ny) t
+                                 |JOIN z ON t.a = z.nz WHERE t.nt -10 > z.nz
+                                 |""".stripMargin)
+  }
+
+  @TestTemplate
   def testHashJoinWithDeadlockCausedByExchangeInAncestor(): Unit = {
     checkOpFusionCodegenResult(
       """
@@ -272,6 +281,19 @@ class OperatorFusionCodegenITCase extends BatchTestBase {
         |  INNER JOIN
         |  (SELECT a, SUM(b) AS cnt, AVG(b) AS pj FROM t GROUP BY a) T2
         |  ON T1.a = T2.a
+        |""".stripMargin
+    )
+  }
+
+  @TestTemplate
+  def testMultipleHashAgg(): Unit = {
+    checkOpFusionCodegenResult(
+      """
+        |SELECT * FROM
+        |  (SELECT a, SUM(b) as b FROM x group by a) T1
+        |  INNER JOIN
+        |  (SELECT d, SUM(e) as e FROM y group by d) T2
+        |  ON T1.a = T2.d
         |""".stripMargin
     )
   }

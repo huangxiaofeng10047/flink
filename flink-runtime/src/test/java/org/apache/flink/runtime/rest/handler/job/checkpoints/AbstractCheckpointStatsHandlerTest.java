@@ -36,7 +36,6 @@ import org.apache.flink.runtime.rest.messages.checkpoints.StatsSummaryDto;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.TestingRestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
-import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.concurrent.Executors;
 
 import org.apache.flink.shaded.guava31.com.google.common.cache.Cache;
@@ -56,7 +55,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatExceptionOfType;
 
 /** Test class for {@link AbstractCheckpointStatsHandler}. */
-public class AbstractCheckpointStatsHandlerTest extends TestLogger {
+class AbstractCheckpointStatsHandlerTest {
 
     private static final Time TIMEOUT = Time.seconds(10);
 
@@ -64,10 +63,12 @@ public class AbstractCheckpointStatsHandlerTest extends TestLogger {
 
     private static final CheckpointStatsTracker checkpointStatsTracker =
             new CheckpointStatsTracker(
-                    10, UnregisteredMetricGroups.createUnregisteredTaskManagerMetricGroup());
+                    10,
+                    UnregisteredMetricGroups.createUnregisteredTaskManagerMetricGroup(),
+                    new JobID());
 
     @Test
-    public void testRetrieveSnapshotFromCache() throws Exception {
+    void testRetrieveSnapshotFromCache() throws Exception {
         GatewayRetriever<RestfulGateway> leaderRetriever =
                 () -> CompletableFuture.completedFuture(null);
         CheckpointingStatistics checkpointingStatistics = getTestCheckpointingStatistics();
@@ -128,7 +129,7 @@ public class AbstractCheckpointStatsHandlerTest extends TestLogger {
     }
 
     @Test
-    public void testRestExceptionPassedThrough() throws Exception {
+    void testRestExceptionPassedThrough() throws Exception {
         GatewayRetriever<RestfulGateway> leaderRetriever =
                 () -> CompletableFuture.completedFuture(null);
         CheckpointStatsSnapshot checkpointStatsSnapshot1 = getTestCheckpointStatsSnapshot();
@@ -171,7 +172,7 @@ public class AbstractCheckpointStatsHandlerTest extends TestLogger {
     }
 
     @Test
-    public void testFlinkJobNotFoundException() throws Exception {
+    void testFlinkJobNotFoundException() throws Exception {
         GatewayRetriever<RestfulGateway> leaderRetriever =
                 () -> CompletableFuture.completedFuture(null);
         CheckpointStatsSnapshot checkpointStatsSnapshot1 = getTestCheckpointStatsSnapshot();

@@ -28,12 +28,13 @@ import org.apache.flink.connector.datagen.source.DataGeneratorSource;
 import org.apache.flink.connector.datagen.source.GeneratorFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingProcessingTimeWindows;
-import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.Window;
 import org.apache.flink.util.Collector;
+
+import java.time.Duration;
 
 /** An example of grouped stream windowing into sliding time windows. */
 public class GroupedProcessingTimeWindowExample {
@@ -60,7 +61,7 @@ public class GroupedProcessingTimeWindowExample {
         stream.keyBy(value -> value.f0)
                 .window(
                         SlidingProcessingTimeWindows.of(
-                                Time.milliseconds(2500), Time.milliseconds(500)))
+                                Duration.ofMillis(2500), Duration.ofMillis(500)))
                 .reduce(new SummingReducer())
 
                 // alternative: use a apply function which does not pre-aggregate
@@ -69,7 +70,7 @@ public class GroupedProcessingTimeWindowExample {
                 // Time.milliseconds(500)))
                 //			.apply(new SummingWindowFunction())
 
-                .addSink(new DiscardingSink<>());
+                .sinkTo(new DiscardingSink<>());
 
         env.execute();
     }

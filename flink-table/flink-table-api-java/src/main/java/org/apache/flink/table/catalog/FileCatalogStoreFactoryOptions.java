@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.catalog;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 
 /** {@link ConfigOption}s for {@link FileCatalogStoreFactory}. */
+@Internal
 public class FileCatalogStoreFactoryOptions {
 
     public static final String IDENTIFIER = "file";
@@ -31,7 +33,7 @@ public class FileCatalogStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The configuration option for specifying the path to the file catalog store.");
+                            "The configuration option for specifying the path to the file catalog store root directory.");
 
     private FileCatalogStoreFactoryOptions() {}
 }

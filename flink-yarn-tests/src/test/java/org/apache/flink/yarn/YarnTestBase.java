@@ -404,7 +404,8 @@ public abstract class YarnTestBase {
             org.apache.flink.configuration.Configuration flinkConfiguration) {
         final YarnClusterDescriptor yarnClusterDescriptor =
                 createYarnClusterDescriptorWithoutLibDir(flinkConfiguration);
-        yarnClusterDescriptor.addShipFiles(Collections.singletonList(flinkLibFolder));
+        yarnClusterDescriptor.addShipFiles(
+                Collections.singletonList(new Path(flinkLibFolder.toURI())));
         return yarnClusterDescriptor;
     }
 
@@ -820,7 +821,9 @@ public abstract class YarnTestBase {
 
             File flinkConfDirPath =
                     TestUtils.findFile(
-                            flinkDistRootDir, new ContainsName(new String[] {"flink-conf.yaml"}));
+                            flinkDistRootDir,
+                            new ContainsName(
+                                    new String[] {GlobalConfiguration.FLINK_CONF_FILENAME}));
             assertThat(flinkConfDirPath).isNotNull();
 
             final String confDirPath = flinkConfDirPath.getParentFile().getAbsolutePath();
@@ -835,7 +838,8 @@ public abstract class YarnTestBase {
             FileUtils.copyDirectory(new File(confDirPath), tempConfPathForSecureRun);
 
             BootstrapTools.writeConfiguration(
-                    globalConfiguration, new File(tempConfPathForSecureRun, "flink-conf.yaml"));
+                    globalConfiguration,
+                    new File(tempConfPathForSecureRun, GlobalConfiguration.FLINK_CONF_FILENAME));
 
             String configDir = tempConfPathForSecureRun.getAbsolutePath();
 

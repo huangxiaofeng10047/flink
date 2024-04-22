@@ -25,13 +25,14 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.UnmodifiableConfiguration;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.config.TableConfigOptions;
+import org.apache.flink.table.api.internal.PlanCacheManager;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogManager;
-import org.apache.flink.table.catalog.CatalogStore;
 import org.apache.flink.table.catalog.CatalogStoreHolder;
 import org.apache.flink.table.catalog.FunctionCatalog;
 import org.apache.flink.table.catalog.GenericInMemoryCatalog;
 import org.apache.flink.table.factories.CatalogStoreFactory;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.TableFactoryUtil;
 import org.apache.flink.table.gateway.api.endpoint.EndpointVersion;
 import org.apache.flink.table.gateway.api.session.SessionEnvironment;
@@ -50,17 +51,24 @@ import org.apache.flink.util.MutableURLClassLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+
+import static org.apache.flink.table.gateway.api.config.SqlGatewayServiceConfigOptions.SQL_GATEWAY_SESSION_PLAN_CACHE_ENABLED;
+import static org.apache.flink.table.gateway.api.config.SqlGatewayServiceConfigOptions.SQL_GATEWAY_SESSION_PLAN_CACHE_SIZE;
+import static org.apache.flink.table.gateway.api.config.SqlGatewayServiceConfigOptions.SQL_GATEWAY_SESSION_PLAN_CACHE_TTL;
 
 /**
  * Context describing a session, it's mainly used for user to open a new session in the backend. If
@@ -85,6 +93,8 @@ public class SessionContext {
     private boolean isStatementSetState;
     private final List<ModifyOperation> statementSetOperations;
 
+    @Nullable private final PlanCacheManager planCacheManager;
+
     protected SessionContext(
             DefaultContext defaultContext,
             SessionHandle sessionId,
@@ -102,6 +112,18 @@ public class SessionContext {
         this.operationManager = operationManager;
         this.isStatementSetState = false;
         this.statementSetOperations = new ArrayList<>();
+        this.planCacheManager = createPlanCacheManager(sessionConf);
+    }
+
+    @Nullable
+    private static PlanCacheManager createPlanCacheManager(ReadableConfig readableConfig) {
+        boolean planCacheEnabled = readableConfig.get(SQL_GATEWAY_SESSION_PLAN_CACHE_ENABLED);
+        if (planCacheEnabled) {
+            int planCacheSize = readableConfig.get(SQL_GATEWAY_SESSION_PLAN_CACHE_SIZE);
+            Duration ttl = readableConfig.get(SQL_GATEWAY_SESSION_PLAN_CACHE_TTL);
+            return new PlanCacheManager(planCacheSize, ttl);
+        }
+        return null;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -136,6 +158,11 @@ public class SessionContext {
         return userClassloader;
     }
 
+    @Nullable
+    public PlanCacheManager getPlanCacheManager() {
+        return planCacheManager;
+    }
+
     public void set(String key, String value) {
         try {
             // Test whether the key value will influence the creation of the Executor.
@@ -147,6 +174,7 @@ public class SessionContext {
                     String.format("Failed to set key %s with value %s.", key, value), e);
         }
         sessionConf.setString(key, value);
+        invalidatePlanCacheIfExist();
     }
 
     public synchronized void reset(String key) {
@@ -159,6 +187,7 @@ public class SessionContext {
         } else {
             sessionConf.removeConfig(option);
         }
+        invalidatePlanCacheIfExist();
     }
 
     public synchronized void reset() {
@@ -166,6 +195,7 @@ public class SessionContext {
             sessionConf.removeConfig(ConfigOptions.key(key).stringType().noDefaultValue());
         }
         sessionConf.addAll(defaultContext.getFlinkConfig());
+        invalidatePlanCacheIfExist();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -174,6 +204,12 @@ public class SessionContext {
 
     public OperationExecutor createOperationExecutor(Configuration executionConfig) {
         return new OperationExecutor(this, executionConfig);
+    }
+
+    private void invalidatePlanCacheIfExist() {
+        if (planCacheManager != null) {
+            planCacheManager.invalidateAll();
+        }
     }
 
     // --------------------------------------------------------------------------------------------
@@ -331,7 +367,13 @@ public class SessionContext {
         CatalogStoreFactory.Context catalogStoreFactoryContext =
                 TableFactoryUtil.buildCatalogStoreFactoryContext(configuration, userClassLoader);
         catalogStoreFactory.open(catalogStoreFactoryContext);
-        CatalogStore catalogStore = catalogStoreFactory.createCatalogStore();
+        CatalogStoreHolder catalogStore =
+                CatalogStoreHolder.newBuilder()
+                        .catalogStore(catalogStoreFactory.createCatalogStore())
+                        .classloader(userClassLoader)
+                        .config(configuration)
+                        .factory(catalogStoreFactory)
+                        .build();
 
         CatalogManager.Builder builder =
                 CatalogManager.newBuilder()
@@ -341,13 +383,7 @@ public class SessionContext {
                         .catalogModificationListeners(
                                 TableFactoryUtil.findCatalogModificationListenerList(
                                         configuration, userClassLoader))
-                        .catalogStoreHolder(
-                                CatalogStoreHolder.newBuilder()
-                                        .catalogStore(catalogStore)
-                                        .classloader(userClassLoader)
-                                        .config(configuration)
-                                        .factory(catalogStoreFactory)
-                                        .build());
+                        .catalogStoreHolder(catalogStore);
 
         // init default catalog
         String defaultCatalogName;
@@ -372,8 +408,19 @@ public class SessionContext {
             }
 
             defaultCatalog =
-                    new GenericInMemoryCatalog(
-                            defaultCatalogName, settings.getBuiltInDatabaseName());
+                    catalogStore
+                            .catalogStore()
+                            .getCatalog(defaultCatalogName)
+                            .map(
+                                    catalogDescriptor ->
+                                            FactoryUtil.createCatalog(
+                                                    defaultCatalogName,
+                                                    catalogDescriptor.getConfiguration().toMap(),
+                                                    catalogStore.config(),
+                                                    catalogStore.classLoader()))
+                            .orElse(
+                                    new GenericInMemoryCatalog(
+                                            defaultCatalogName, settings.getBuiltInDatabaseName()));
         }
         defaultCatalog.open();
 

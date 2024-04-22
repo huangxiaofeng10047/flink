@@ -23,6 +23,7 @@ import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableDescriptor;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.Column;
@@ -30,11 +31,13 @@ import org.apache.flink.table.catalog.GenericInMemoryCatalog;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CollectionUtil;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.apache.flink.table.api.DataTypes.INT;
 import static org.apache.flink.table.api.DataTypes.STRING;
@@ -43,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for no default catalog and/or database. */
-public class UnknownCatalogTest {
+class UnknownCatalogTest {
 
     public static final String BUILTIN_CATALOG = "cat";
     private static final String BUILTIN_DATABASE = "db";
@@ -60,7 +63,7 @@ public class UnknownCatalogTest {
             ResolvedSchema.of(Column.physical("CURRENT_TIMESTAMP", TIMESTAMP_LTZ(3).notNull()));
 
     @Test
-    public void testUnsetCatalogWithSelectCurrentTimestamp() throws Exception {
+    void testUnsetCatalogWithSelectCurrentTimestamp() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(null);
@@ -70,7 +73,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testSetCatalogUnsetDatabaseWithSelectCurrentTimestamp() throws Exception {
+    void testSetCatalogUnsetDatabaseWithSelectCurrentTimestamp() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(BUILTIN_CATALOG);
@@ -81,7 +84,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testSetCatalogWithSelectCurrentTimestamp() throws Exception {
+    void testSetCatalogWithSelectCurrentTimestamp() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(BUILTIN_CATALOG);
@@ -91,7 +94,20 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUnsetCatalogWithFullyQualified() throws Exception {
+    void testUnsetCatalogWithShowFunctions() {
+        TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
+
+        tEnv.useCatalog(null);
+
+        TableResult table = tEnv.executeSql("SHOW FUNCTIONS");
+        final List<Row> functions = CollectionUtil.iteratorToList(table.collect());
+
+        // check it has some built-in functions
+        assertThat(functions).hasSizeGreaterThan(0);
+    }
+
+    @Test
+    void testUnsetCatalogWithFullyQualified() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(null);
@@ -104,7 +120,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUnsetCatalogWithSingleIdentifier() throws Exception {
+    void testUnsetCatalogWithSingleIdentifier() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(null);
@@ -119,7 +135,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUsingUnknownDatabaseWithDatabaseQualified() throws Exception {
+    void testUsingUnknownDatabaseWithDatabaseQualified() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
         tEnv.useDatabase(null);
 
@@ -135,7 +151,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUsingUnknownDatabaseWithSingleIdentifier() throws Exception {
+    void testUsingUnknownDatabaseWithSingleIdentifier() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
         tEnv.useDatabase(null);
 
@@ -150,7 +166,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUnsetCatalogWithAlterTable() throws Exception {
+    void testUnsetCatalogWithAlterTable() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useCatalog(null);
@@ -171,7 +187,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUnsetDatabaseWithAlterTable() throws Exception {
+    void testUnsetDatabaseWithAlterTable() {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         tEnv.useDatabase(null);
@@ -193,7 +209,7 @@ public class UnknownCatalogTest {
     }
 
     @Test
-    public void testUnsetDatabaseComingFromCatalogWithAlterTable() throws Exception {
+    void testUnsetDatabaseComingFromCatalogWithAlterTable() throws Exception {
         TableEnvironment tEnv = TableEnvironment.create(ENVIRONMENT_SETTINGS);
 
         final String catalogName = "custom";

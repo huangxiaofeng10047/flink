@@ -100,17 +100,12 @@ class EdgeManagerBuildUtilTest {
         final ExecutionJobVertex consumer = vertexIterator.next();
 
         // initialize producer and consumer
-        eg.initializeJobVertex(
-                producer,
-                1L,
-                Collections.emptyMap(),
-                UnregisteredMetricGroups.createUnregisteredJobManagerJobMetricGroup());
+        eg.initializeJobVertex(producer, 1L, Collections.emptyMap());
         eg.initializeJobVertex(
                 consumer,
                 1L,
                 Collections.singletonMap(
-                        producer.getProducedDataSets()[0].getId(), jobVertexInputInfo),
-                UnregisteredMetricGroups.createUnregisteredJobManagerJobMetricGroup());
+                        producer.getProducedDataSets()[0].getId(), jobVertexInputInfo));
 
         IntermediateResult result =
                 Objects.requireNonNull(eg.getJobVertex(producer.getJobVertexId()))
@@ -175,17 +170,12 @@ class EdgeManagerBuildUtilTest {
         final ExecutionJobVertex consumer = vertexIterator.next();
 
         // initialize producer and consumer
-        eg.initializeJobVertex(
-                producer,
-                1L,
-                Collections.emptyMap(),
-                UnregisteredMetricGroups.createUnregisteredJobManagerJobMetricGroup());
+        eg.initializeJobVertex(producer, 1L, Collections.emptyMap());
         eg.initializeJobVertex(
                 consumer,
                 1L,
                 Collections.singletonMap(
-                        producer.getProducedDataSets()[0].getId(), jobVertexInputInfo),
-                UnregisteredMetricGroups.createUnregisteredJobManagerJobMetricGroup());
+                        producer.getProducedDataSets()[0].getId(), jobVertexInputInfo));
 
         IntermediateResult result =
                 Objects.requireNonNull(eg.getJobVertex(producer.getJobVertexId()))
@@ -266,7 +256,7 @@ class EdgeManagerBuildUtilTest {
                         downstream, upstream, pattern);
         int actualMaxForDownstream = -1;
         for (ExecutionVertex ev : downstreamEJV.getTaskVertices()) {
-            assertThat(ev.getNumberOfInputs()).isEqualTo(1);
+            assertThat(ev.getNumberOfInputs()).isOne();
 
             int actual = ev.getConsumedPartitionGroup(0).size();
             if (actual > actualMaxForDownstream) {

@@ -30,6 +30,7 @@ import org.apache.flink.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -192,16 +193,15 @@ public class SequenceGeneratorSource extends RichParallelSourceFunction<Event>
     public void snapshotState(FunctionSnapshotContext context) throws Exception {
         snapshotKeyRanges.update(keyRanges);
 
-        lastEventTimes.clear();
-        lastEventTimes.add(monotonousEventTime);
+        lastEventTimes.update(Collections.singletonList(monotonousEventTime));
     }
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
         final RuntimeContext runtimeContext = getRuntimeContext();
-        final int subtaskIdx = runtimeContext.getIndexOfThisSubtask();
-        final int parallelism = runtimeContext.getNumberOfParallelSubtasks();
-        final int maxParallelism = runtimeContext.getMaxNumberOfParallelSubtasks();
+        final int subtaskIdx = runtimeContext.getTaskInfo().getIndexOfThisSubtask();
+        final int parallelism = runtimeContext.getTaskInfo().getNumberOfParallelSubtasks();
+        final int maxParallelism = runtimeContext.getTaskInfo().getMaxNumberOfParallelSubtasks();
 
         ListStateDescriptor<Long> unionWatermarksStateDescriptor =
                 new ListStateDescriptor<>("watermarks", Long.class);

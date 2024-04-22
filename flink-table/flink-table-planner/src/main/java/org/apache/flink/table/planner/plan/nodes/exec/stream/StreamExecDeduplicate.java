@@ -171,7 +171,8 @@ public class StreamExecDeduplicate extends ExecNodeBase<RowData>
         final InternalTypeInfo<RowData> rowTypeInfo =
                 (InternalTypeInfo<RowData>) inputTransform.getOutputType();
         final TypeSerializer<RowData> rowSerializer =
-                rowTypeInfo.createSerializer(planner.getExecEnv().getConfig());
+                rowTypeInfo.createSerializer(
+                        planner.getExecEnv().getConfig().getSerializerConfig());
         final OneInputStreamOperator<RowData, RowData> operator;
 
         long stateRetentionTime =
@@ -253,10 +254,6 @@ public class StreamExecDeduplicate extends ExecNodeBase<RowData>
 
         protected boolean isCompactChanges() {
             return config.get(TABLE_EXEC_DEDUPLICATE_MINIBATCH_COMPACT_CHANGES_ENABLED);
-        }
-
-        protected long getMinRetentionTime() {
-            return config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis();
         }
 
         protected long getMiniBatchSize() {

@@ -60,8 +60,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -136,11 +138,16 @@ public final class CatalogManager implements CatalogRegistry, AutoCloseable {
         return catalogModificationListeners;
     }
 
+    public Optional<CatalogDescriptor> getCatalogDescriptor(String catalogName) {
+        return catalogStoreHolder.catalogStore().getCatalog(catalogName);
+    }
+
     public static Builder newBuilder() {
         return new Builder();
     }
 
     /** Builder for a fluent definition of a {@link CatalogManager}. */
+    @Internal
     public static final class Builder {
 
         private @Nullable ClassLoader classLoader;
@@ -200,18 +207,20 @@ public final class CatalogManager implements CatalogRegistry, AutoCloseable {
             checkNotNull(classLoader, "Class loader cannot be null");
             checkNotNull(config, "Config cannot be null");
             checkNotNull(catalogStoreHolder, "CatalogStoreHolder cannot be null");
-            catalogStoreHolder.open();
-            CatalogManager catalogManager =
-                    new CatalogManager(
-                            defaultCatalogName,
-                            defaultCatalog,
-                            dataTypeFactory != null
-                                    ? dataTypeFactory
-                                    : new DataTypeFactoryImpl(classLoader, config, executionConfig),
-                            new ManagedTableListener(classLoader, config),
-                            catalogModificationListeners,
-                            catalogStoreHolder);
-            return catalogManager;
+            return new CatalogManager(
+                    defaultCatalogName,
+                    defaultCatalog,
+                    dataTypeFactory != null
+                            ? dataTypeFactory
+                            : new DataTypeFactoryImpl(
+                                    classLoader,
+                                    config,
+                                    executionConfig == null
+                                            ? null
+                                            : executionConfig.getSerializerConfig()),
+                    new ManagedTableListener(classLoader, config),
+                    catalogModificationListeners,
+                    catalogStoreHolder);
         }
     }
 
@@ -397,8 +406,7 @@ public final class CatalogManager implements CatalogRegistry, AutoCloseable {
         }
 
         // Get catalog from the CatalogStore.
-        Optional<CatalogDescriptor> optionalDescriptor =
-                catalogStoreHolder.catalogStore().getCatalog(catalogName);
+        Optional<CatalogDescriptor> optionalDescriptor = getCatalogDescriptor(catalogName);
         return optionalDescriptor.map(
                 descriptor -> {
                     Catalog catalog = initCatalog(catalogName, descriptor);
@@ -1326,12 +1334,45 @@ public final class CatalogManager implements CatalogRegistry, AutoCloseable {
 
         final ResolvedSchema resolvedSchema = table.getUnresolvedSchema().resolve(schemaResolver);
 
-        // Validate partition keys are included in physical columns
+        // Validate distribution keys are included in physical columns
         final List<String> physicalColumns =
                 resolvedSchema.getColumns().stream()
                         .filter(Column::isPhysical)
                         .map(Column::getName)
                         .collect(Collectors.toList());
+
+        final Consumer<TableDistribution> distributionValidation =
+                distribution -> {
+                    distribution
+                            .getBucketKeys()
+                            .forEach(
+                                    bucketKey -> {
+                                        if (!physicalColumns.contains(bucketKey)) {
+                                            throw new ValidationException(
+                                                    String.format(
+                                                            "Invalid bucket key '%s'. A bucket key for a distribution must "
+                                                                    + "reference a physical column in the schema. "
+                                                                    + "Available columns are: %s",
+                                                            bucketKey, physicalColumns));
+                                        }
+                                    });
+
+                    distribution
+                            .getBucketCount()
+                            .ifPresent(
+                                    c -> {
+                                        if (c <= 0) {
+                                            throw new ValidationException(
+                                                    String.format(
+                                                            "Invalid bucket count '%s'. The number of "
+                                                                    + "buckets for a distributed table must be at least 1.",
+                                                            c));
+                                        }
+                                    });
+                };
+
+        table.getDistribution().ifPresent(distributionValidation);
+
         table.getPartitionKeys()
                 .forEach(
                         partitionKey -> {
@@ -1406,6 +1447,10 @@ public final class CatalogManager implements CatalogRegistry, AutoCloseable {
     public void dropDatabase(
             String catalogName, String databaseName, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException, CatalogException {
+        if (Objects.equals(currentCatalogName, catalogName)
+                && Objects.equals(currentDatabaseName, databaseName)) {
+            throw new ValidationException("Cannot drop a database which is currently in use.");
+        }
         Catalog catalog = getCatalogOrError(catalogName);
         catalog.dropDatabase(databaseName, ignoreIfNotExists, cascade);
         catalogModificationListeners.forEach(

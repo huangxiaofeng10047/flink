@@ -21,8 +21,12 @@ package org.apache.flink.configuration;
 import org.apache.flink.annotation.Experimental;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.docs.Documentation;
+import org.apache.flink.configuration.description.Description;
+
+import java.time.Duration;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.configuration.description.TextElement.code;
 
 /** The set of configuration options relating to network stack. */
 @PublicEvolving
@@ -54,12 +58,18 @@ public class NettyShuffleEnvironmentOptions {
                             "The task manager’s external port used for data exchange operations.");
 
     /** The local network port that the task manager listen at for data exchange. */
-    public static final ConfigOption<Integer> DATA_BIND_PORT =
+    @Documentation.Section({
+        Documentation.Sections.COMMON_HOST_PORT,
+        Documentation.Sections.ALL_TASK_MANAGER
+    })
+    public static final ConfigOption<String> DATA_BIND_PORT =
             key("taskmanager.data.bind-port")
-                    .intType()
+                    .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The task manager's bind port used for data exchange operations. If not configured, '"
+                            "The task manager's bind port used for data exchange operations."
+                                    + " Also accepts a list of ports (“50100,50101”), ranges (“50100-50200”) or a combination of both."
+                                    + " If not configured, '"
                                     + DATA_PORT.key()
                                     + "' will be used.");
 
@@ -425,6 +435,19 @@ public class NettyShuffleEnvironmentOptions {
                                     + HYBRID_SHUFFLE_NEW_MODE_OPTION_NAME
                                     + " is true, the remote storage will be disabled.");
 
+    /** The option to decouple the needed memory of hybrid shuffle and the job topology. */
+    @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
+    @Experimental
+    public static final ConfigOption<Boolean> NETWORK_HYBRID_SHUFFLE_ENABLE_MEMORY_DECOUPLING =
+            key("taskmanager.network.hybrid-shuffle.memory-decoupling.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "The option is used to make the memory that is used by hybrid shuffle decoupled from the complexity of the"
+                                    + " job topology and the number of tasks on the task manager. It significantly reduces the chance of "
+                                    + "the \"Insufficient number of network buffers\" exception, while the workloads may suffer performance "
+                                    + "reduction silently.");
+
     @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
     public static final ConfigOption<String> NETWORK_BLOCKING_SHUFFLE_TYPE =
             key("taskmanager.network.blocking-shuffle.type")
@@ -579,7 +602,7 @@ public class NettyShuffleEnvironmentOptions {
                     .defaultValue(100)
                     .withDeprecatedKeys("taskmanager.net.request-backoff.initial")
                     .withDescription(
-                            "Minimum backoff in milliseconds for partition requests of input channels.");
+                            "Minimum backoff in milliseconds for partition requests of local input channels.");
 
     /** Maximum backoff for partition requests of input channels. */
     @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
@@ -589,7 +612,22 @@ public class NettyShuffleEnvironmentOptions {
                     .defaultValue(10000)
                     .withDeprecatedKeys("taskmanager.net.request-backoff.max")
                     .withDescription(
-                            "Maximum backoff in milliseconds for partition requests of input channels.");
+                            "Maximum backoff in milliseconds for partition requests of local input channels.");
+
+    /** The timeout for partition request listener in result partition manager. */
+    @Documentation.Section(Documentation.Sections.ALL_TASK_MANAGER_NETWORK)
+    public static final ConfigOption<Duration> NETWORK_PARTITION_REQUEST_TIMEOUT =
+            key("taskmanager.network.partition-request-timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(10))
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Timeout for an individual partition request of remote input channels. "
+                                                    + "The partition request will finally fail if the total wait time exceeds "
+                                                    + "twice the value of %s.",
+                                            code(NETWORK_REQUEST_BACKOFF_MAX.key()))
+                                    .build());
 
     // ------------------------------------------------------------------------
 

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.catalog;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
@@ -45,6 +46,7 @@ import java.util.stream.Collectors;
  * every catalog will be saved into a single file. The file name will be {catalogName}.yaml by
  * default.
  */
+@Internal
 public class FileCatalogStore extends AbstractCatalogStore {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileCatalogStore.class);
@@ -78,10 +80,7 @@ public class FileCatalogStore extends AbstractCatalogStore {
         try {
             FileSystem fs = catalogStorePath.getFileSystem();
             if (!fs.exists(catalogStorePath)) {
-                throw new CatalogException(
-                        String.format(
-                                "Failed to open catalog store. The catalog store directory %s does not exist.",
-                                catalogStorePath));
+                fs.mkdirs(catalogStorePath);
             }
 
             if (!fs.getFileStatus(catalogStorePath).isDir()) {
@@ -126,7 +125,7 @@ public class FileCatalogStore extends AbstractCatalogStore {
             }
 
             try (FSDataOutputStream os = fs.create(catalogPath, WriteMode.NO_OVERWRITE)) {
-                YAML_MAPPER.writeValue(os, catalog.getConfiguration().toMap());
+                YAML_MAPPER.writeValue(os, catalog.getConfiguration().toFileWritableMap());
             }
 
             LOG.info("Catalog {}'s configuration saved to file {}", catalogName, catalogPath);

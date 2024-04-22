@@ -268,7 +268,7 @@ public class ContinuousFileReaderOperator<OUT, T extends TimestampedInputSplit>
                 context.getOperatorStateStore()
                         .getListState(new ListStateDescriptor<>("splits", new JavaSerializer<>()));
 
-        int subtaskIdx = getRuntimeContext().getIndexOfThisSubtask();
+        int subtaskIdx = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
         if (!context.isRestored()) {
             LOG.info(
                     "No state to restore for the {} (taskIdx={}).",
@@ -312,7 +312,7 @@ public class ContinuousFileReaderOperator<OUT, T extends TimestampedInputSplit>
                         getProcessingTimeService(),
                         new Object(), // no actual locking needed
                         output,
-                        getRuntimeContext().getExecutionConfig().getAutoWatermarkInterval(),
+                        getExecutionConfig().getAutoWatermarkInterval(),
                         -1,
                         true);
 
@@ -525,16 +525,12 @@ public class ContinuousFileReaderOperator<OUT, T extends TimestampedInputSplit>
         checkState(
                 checkpointedState != null, "The operator state has not been properly initialized.");
 
-        int subtaskIdx = getRuntimeContext().getIndexOfThisSubtask();
-
-        checkpointedState.clear();
+        int subtaskIdx = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
 
         List<T> readerState = getReaderState();
 
         try {
-            for (T split : readerState) {
-                checkpointedState.add(split);
-            }
+            checkpointedState.update(readerState);
         } catch (Exception e) {
             checkpointedState.clear();
 
@@ -573,6 +569,6 @@ public class ContinuousFileReaderOperator<OUT, T extends TimestampedInputSplit>
 
     @Override
     public void setOutputType(TypeInformation<OUT> outTypeInfo, ExecutionConfig executionConfig) {
-        this.serializer = outTypeInfo.createSerializer(executionConfig);
+        this.serializer = outTypeInfo.createSerializer(executionConfig.getSerializerConfig());
     }
 }

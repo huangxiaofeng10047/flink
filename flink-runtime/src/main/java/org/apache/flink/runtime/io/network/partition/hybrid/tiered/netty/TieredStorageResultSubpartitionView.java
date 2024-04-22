@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.runtime.io.network.buffer.Buffer.DataType.END_OF_SEGMENT;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * The {@link TieredStorageResultSubpartitionView} is the implementation of {@link
@@ -92,12 +93,12 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
     }
 
     @Override
-    public AvailabilityWithBacklog getAvailabilityAndBacklog(int numCreditsAvailable) {
+    public AvailabilityWithBacklog getAvailabilityAndBacklog(boolean isCreditAvailable) {
         if (findCurrentNettyPayloadQueue()) {
             NettyPayloadManager currentQueue =
                     nettyPayloadManagers.get(managerIndexContainsCurrentSegment);
-            boolean availability = numCreditsAvailable > 0;
-            if (numCreditsAvailable == 0 && isEventOrError(currentQueue)) {
+            boolean availability = isCreditAvailable;
+            if (!isCreditAvailable && isEventOrError(currentQueue)) {
                 availability = true;
             }
             return new AvailabilityWithBacklog(availability, getBacklog());
@@ -106,12 +107,17 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
     }
 
     @Override
-    public void notifyRequiredSegmentId(int segmentId) {
+    public void notifyRequiredSegmentId(int subpartitionId, int segmentId) {
         if (segmentId > requiredSegmentId) {
             requiredSegmentId = segmentId;
             stopSendingData = false;
-            availabilityListener.notifyDataAvailable();
+            availabilityListener.notifyDataAvailable(this);
         }
+    }
+
+    @Override
+    public int peekNextBufferSubpartitionId() {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -157,8 +163,7 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
 
     @Override
     public void notifyDataAvailable() {
-        throw new UnsupportedOperationException(
-                "Method notifyDataAvailable should never be called.");
+        availabilityListener.notifyDataAvailable(this);
     }
 
     @Override
@@ -187,9 +192,7 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
         if (nettyPayload == null) {
             return Optional.empty();
         } else {
-            if (nettyPayload.getSegmentId() != -1) {
-                return readNettyPayload(nettyPayloadManager);
-            }
+            checkState(nettyPayload.getSegmentId() == -1);
             Optional<Throwable> error = nettyPayload.getError();
             if (error.isPresent()) {
                 releaseAllResources();
@@ -201,11 +204,9 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
     }
 
     private int getBacklog() {
-        int backlog = 0;
-        for (NettyPayloadManager nettyPayloadManager : nettyPayloadManagers) {
-            backlog += nettyPayloadManager.getBacklog();
-        }
-        return backlog;
+        return managerIndexContainsCurrentSegment == -1
+                ? 0
+                : nettyPayloadManagers.get(managerIndexContainsCurrentSegment).getBacklog();
     }
 
     private boolean isEventOrError(NettyPayloadManager nettyPayloadManager) {
@@ -246,6 +247,9 @@ public class TieredStorageResultSubpartitionView implements ResultSubpartitionVi
                 continue;
             }
             managerIndexContainsCurrentSegment = managerIndex;
+            NettyPayload segmentId =
+                    nettyPayloadManagers.get(managerIndexContainsCurrentSegment).poll();
+            checkState(segmentId.getSegmentId() != -1);
             return true;
         }
         return false;

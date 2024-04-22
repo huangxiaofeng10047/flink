@@ -29,7 +29,7 @@ import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.util.Preconditions;
 
@@ -71,7 +71,7 @@ public class HeavyDeploymentStressTestProgram {
 
         env.addSource(new SimpleEndlessSourceWithBloatedState(numStates, numPartitionsPerState))
                 .setParallelism(env.getParallelism())
-                .addSink(new DiscardingSink<>())
+                .sinkTo(new DiscardingSink<>())
                 .setParallelism(1);
 
         env.execute("HeavyDeploymentStressTestProgram");
@@ -136,7 +136,7 @@ public class HeavyDeploymentStressTestProgram {
         public void run(SourceContext<String> ctx) throws Exception {
             while (isRunning) {
 
-                if (readyToFail && getRuntimeContext().getIndexOfThisSubtask() == 0) {
+                if (readyToFail && getRuntimeContext().getTaskInfo().getIndexOfThisSubtask() == 0) {
                     throw new Exception("Artificial failure.");
                 }
 

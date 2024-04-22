@@ -25,7 +25,10 @@ import org.apache.flink.runtime.checkpoint.FullyFinishedOperatorState;
 import org.apache.flink.runtime.checkpoint.MasterState;
 import org.apache.flink.runtime.checkpoint.OperatorState;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.checkpoint.filemerging.LogicalFile;
 import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.state.CheckpointedStateScope;
+import org.apache.flink.runtime.state.DiscardRecordedStateObject;
 import org.apache.flink.runtime.state.IncrementalKeyedStateHandle.HandleAndLocalPath;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
@@ -38,11 +41,16 @@ import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.state.TestingRelativeFileStateHandle;
 import org.apache.flink.runtime.state.TestingStreamStateHandle;
+import org.apache.flink.runtime.state.filemerging.DirectoryStreamStateHandle;
+import org.apache.flink.runtime.state.filemerging.EmptyFileMergingOperatorStreamStateHandle;
+import org.apache.flink.runtime.state.filemerging.FileMergingOperatorStreamStateHandle;
+import org.apache.flink.runtime.state.filemerging.SegmentFileStateHandle;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.util.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -57,8 +65,7 @@ import static org.apache.flink.runtime.checkpoint.StateHandleDummyUtil.createNew
 import static org.apache.flink.runtime.checkpoint.StateHandleDummyUtil.createNewResultSubpartitionStateHandle;
 import static org.apache.flink.runtime.checkpoint.StateObjectCollection.empty;
 import static org.apache.flink.runtime.checkpoint.StateObjectCollection.singleton;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A collection of utility methods for testing the (de)serialization of checkpoint metadata for
@@ -141,36 +148,13 @@ public class CheckpointTestUtils {
         boolean isIncremental = random.nextInt(3) == 0;
 
         for (int subtaskIdx : subtasksToSet) {
-            StreamStateHandle operatorStateBackend =
-                    new ByteStreamStateHandle(
-                            "b", ("Beautiful").getBytes(ConfigConstants.DEFAULT_CHARSET));
-            StreamStateHandle operatorStateStream =
-                    new ByteStreamStateHandle(
-                            "b", ("Beautiful").getBytes(ConfigConstants.DEFAULT_CHARSET));
-
-            Map<String, OperatorStateHandle.StateMetaInfo> offsetsMap = new HashMap<>();
-            offsetsMap.put(
-                    "A",
-                    new OperatorStateHandle.StateMetaInfo(
-                            new long[] {0, 10, 20}, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
-            offsetsMap.put(
-                    "B",
-                    new OperatorStateHandle.StateMetaInfo(
-                            new long[] {30, 40, 50}, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
-            offsetsMap.put(
-                    "C",
-                    new OperatorStateHandle.StateMetaInfo(
-                            new long[] {60, 70, 80}, OperatorStateHandle.Mode.UNION));
-
             final OperatorSubtaskState.Builder state = OperatorSubtaskState.builder();
             if (hasOperatorStateBackend) {
-                state.setManagedOperatorState(
-                        new OperatorStreamStateHandle(offsetsMap, operatorStateBackend));
+                state.setManagedOperatorState(createDummyOperatorStreamStateHandle(random));
             }
 
             if (hasOperatorStateStream) {
-                state.setRawOperatorState(
-                        new OperatorStreamStateHandle(offsetsMap, operatorStateStream));
+                state.setRawOperatorState(createDummyOperatorStreamStateHandle(random));
             }
 
             if (hasKeyedBackend) {
@@ -210,6 +194,45 @@ public class CheckpointTestUtils {
         }
     }
 
+    private static OperatorStreamStateHandle createDummyOperatorStreamStateHandle(Random rnd) {
+        Map<String, OperatorStateHandle.StateMetaInfo> offsetsMap = new HashMap<>();
+        offsetsMap.put(
+                "A",
+                new OperatorStateHandle.StateMetaInfo(
+                        new long[] {0, 10, 20}, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
+        offsetsMap.put(
+                "B",
+                new OperatorStateHandle.StateMetaInfo(
+                        new long[] {30, 40, 50}, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
+        offsetsMap.put(
+                "C",
+                new OperatorStateHandle.StateMetaInfo(
+                        new long[] {60, 70, 80}, OperatorStateHandle.Mode.UNION));
+
+        boolean enableFileMerging = rnd.nextBoolean();
+        if (enableFileMerging) {
+            DirectoryStreamStateHandle taskOwnedDirHandle =
+                    DirectoryStreamStateHandle.forPathWithZeroSize(
+                            new File(String.valueOf(createRandomUUID(rnd))).toPath());
+            DirectoryStreamStateHandle sharedDirHandle =
+                    DirectoryStreamStateHandle.forPathWithZeroSize(
+                            new File(String.valueOf(createRandomUUID(rnd))).toPath());
+            return rnd.nextBoolean()
+                    ? new FileMergingOperatorStreamStateHandle(
+                            taskOwnedDirHandle,
+                            sharedDirHandle,
+                            offsetsMap,
+                            createDummySegmentFileStateHandle(rnd, false))
+                    : EmptyFileMergingOperatorStreamStateHandle.create(
+                            taskOwnedDirHandle, sharedDirHandle);
+        } else {
+            StreamStateHandle operatorStateStream =
+                    new ByteStreamStateHandle(
+                            "b", ("Beautiful").getBytes(ConfigConstants.DEFAULT_CHARSET));
+            return new OperatorStreamStateHandle(offsetsMap, operatorStateStream);
+        }
+    }
+
     private static boolean isSavepoint(String basePath) {
         return basePath != null;
     }
@@ -237,9 +260,9 @@ public class CheckpointTestUtils {
      * well defined in the raw contents.
      */
     public static void assertMasterStateEquality(MasterState a, MasterState b) {
-        assertEquals(a.version(), b.version());
-        assertEquals(a.name(), b.name());
-        assertArrayEquals(a.bytes(), b.bytes());
+        assertThat(b.version()).isEqualTo(a.version());
+        assertThat(b.name()).isEqualTo(a.name());
+        assertThat(b.bytes()).isEqualTo(a.bytes());
     }
 
     // ------------------------------------------------------------------------
@@ -264,11 +287,15 @@ public class CheckpointTestUtils {
     }
 
     public static List<HandleAndLocalPath> createRandomHandleAndLocalPathList(Random rnd) {
+        boolean enableFileMerging = rnd.nextBoolean();
         final int size = rnd.nextInt(4);
         List<HandleAndLocalPath> result = new ArrayList<>(size);
         for (int i = 0; i < size; ++i) {
             String localPath = createRandomUUID(rnd).toString();
-            StreamStateHandle stateHandle = createDummyStreamStateHandle(rnd, null);
+            StreamStateHandle stateHandle =
+                    enableFileMerging
+                            ? createDummySegmentFileStateHandle(rnd)
+                            : createDummyStreamStateHandle(rnd, null);
             result.add(HandleAndLocalPath.of(stateHandle, localPath));
         }
 
@@ -306,6 +333,60 @@ public class CheckpointTestUtils {
             String relativePath = String.valueOf(createRandomUUID(rnd));
             Path statePath = new Path(basePath, relativePath);
             return new TestingRelativeFileStateHandle(statePath, relativePath, stateSize);
+        }
+    }
+
+    private static StreamStateHandle createDummySegmentFileStateHandle(Random rnd) {
+        return createDummySegmentFileStateHandle(rnd, rnd.nextBoolean());
+    }
+
+    private static StreamStateHandle createDummySegmentFileStateHandle(
+            Random rnd, boolean isEmpty) {
+        return isEmpty
+                ? TestingSegmentFileStateHandle.EMPTY_INSTANCE
+                : new TestingSegmentFileStateHandle(
+                        new Path(String.valueOf(createRandomUUID(rnd))),
+                        0,
+                        1,
+                        CheckpointedStateScope.SHARED);
+    }
+
+    private static class TestingSegmentFileStateHandle extends SegmentFileStateHandle
+            implements DiscardRecordedStateObject {
+
+        private static final long serialVersionUID = 1L;
+
+        private static final TestingSegmentFileStateHandle EMPTY_INSTANCE =
+                new TestingSegmentFileStateHandle(
+                        new Path("empty"), 0, 0, CheckpointedStateScope.EXCLUSIVE);
+
+        private boolean disposed;
+
+        public TestingSegmentFileStateHandle(
+                Path filePath, long startPos, long stateSize, CheckpointedStateScope scope) {
+            super(
+                    filePath,
+                    startPos,
+                    stateSize,
+                    scope,
+                    LogicalFile.LogicalFileId.generateRandomId());
+        }
+
+        @Override
+        public void collectSizeStats(StateObjectSizeStatsCollector collector) {
+            // Collect to LOCAL_MEMORY for test
+            collector.add(StateObjectLocation.LOCAL_MEMORY, getStateSize());
+        }
+
+        @Override
+        public void discardState() {
+            super.discardState();
+            disposed = true;
+        }
+
+        @Override
+        public boolean isDisposed() {
+            return disposed;
         }
     }
 
