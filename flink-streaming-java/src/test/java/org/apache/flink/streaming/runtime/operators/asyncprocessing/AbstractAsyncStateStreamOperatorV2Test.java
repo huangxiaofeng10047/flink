@@ -18,25 +18,37 @@
 
 package org.apache.flink.streaming.runtime.operators.asyncprocessing;
 
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.runtime.asyncprocessing.AsyncExecutionController;
+import org.apache.flink.runtime.asyncprocessing.StateRequestType;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.CheckpointType;
+import org.apache.flink.runtime.state.CheckpointStorageLocationReference;
 import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.runtime.state.hashmap.HashMapStateBackend;
+import org.apache.flink.runtime.state.storage.JobManagerCheckpointStorage;
 import org.apache.flink.streaming.api.operators.AbstractInput;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.Input;
 import org.apache.flink.streaming.api.operators.InternalTimer;
+import org.apache.flink.streaming.api.operators.InternalTimerServiceAsyncImpl;
 import org.apache.flink.streaming.api.operators.MultipleInputStreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.operators.Triggerable;
 import org.apache.flink.streaming.runtime.io.RecordProcessorUtils;
+import org.apache.flink.streaming.runtime.operators.asyncprocessing.AbstractAsyncStateStreamOperatorTest.TestKeySelector;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;
 import org.apache.flink.util.function.ThrowingConsumer;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -45,26 +57,31 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.flink.runtime.state.StateBackendTestUtils.buildAsyncStateBackend;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Basic tests for {@link AbstractAsyncStateStreamOperatorV2}. */
-public class AbstractAsyncStateStreamOperatorV2Test {
+class AbstractAsyncStateStreamOperatorV2Test {
 
     protected KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
             createTestHarness(
                     int maxParalelism, int numSubtasks, int subtaskIndex, ElementOrder elementOrder)
                     throws Exception {
-        return new KeyedOneInputStreamOperatorV2TestHarness<>(
-                new TestOperatorFactory(elementOrder),
-                new AbstractAsyncStateStreamOperatorTest.TestKeySelector(),
-                BasicTypeInfo.INT_TYPE_INFO,
-                maxParalelism,
-                numSubtasks,
-                subtaskIndex);
+        KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
+                testHarness =
+                        new KeyedOneInputStreamOperatorV2TestHarness<>(
+                                new TestOperatorFactory(elementOrder),
+                                new TestKeySelector(),
+                                BasicTypeInfo.INT_TYPE_INFO,
+                                maxParalelism,
+                                numSubtasks,
+                                subtaskIndex);
+        testHarness.setStateBackend(buildAsyncStateBackend(new HashMapStateBackend()));
+        return testHarness;
     }
 
     @Test
-    public void testCreateAsyncExecutionController() throws Exception {
+    void testCreateAsyncExecutionController() throws Exception {
         try (KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
                 testHarness = createTestHarness(128, 1, 0, ElementOrder.RECORD_ORDER)) {
             testHarness.open();
@@ -74,11 +91,16 @@ public class AbstractAsyncStateStreamOperatorV2Test {
                             ((AbstractAsyncStateStreamOperatorV2) testHarness.getBaseOperator())
                                     .getAsyncExecutionController())
                     .isNotNull();
+            assertThat(
+                            ((AbstractAsyncStateStreamOperatorV2) testHarness.getBaseOperator())
+                                    .getAsyncExecutionController()
+                                    .getStateExecutor())
+                    .isNotNull();
         }
     }
 
     @Test
-    public void testRecordProcessorWithFirstStateOrder() throws Exception {
+    void testRecordProcessorWithFirstStateOrder() throws Exception {
         try (KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
                 testHarness = createTestHarness(128, 1, 0, ElementOrder.FIRST_STATE_ORDER)) {
             testHarness.open();
@@ -109,7 +131,7 @@ public class AbstractAsyncStateStreamOperatorV2Test {
     }
 
     @Test
-    public void testRecordProcessorWithRecordOrder() throws Exception {
+    void testRecordProcessorWithRecordOrder() throws Exception {
         try (KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
                 testHarness = createTestHarness(128, 1, 0, ElementOrder.RECORD_ORDER)) {
             testHarness.open();
@@ -138,6 +160,57 @@ public class AbstractAsyncStateStreamOperatorV2Test {
             anotherThread.shutdown();
             Thread.sleep(1000);
             assertThat(testOperator.getCurrentProcessingContext().getReferenceCount()).isEqualTo(0);
+        }
+    }
+
+    @Test
+    void testCheckpointDrain() throws Exception {
+        try (KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
+                testHarness = createTestHarness(128, 1, 0, ElementOrder.RECORD_ORDER)) {
+            testHarness.open();
+            SingleInputTestOperator testOperator =
+                    (SingleInputTestOperator) testHarness.getBaseOperator();
+            CheckpointStorageLocationReference locationReference =
+                    CheckpointStorageLocationReference.getDefault();
+            AsyncExecutionController asyncExecutionController =
+                    testOperator.getAsyncExecutionController();
+            testOperator.setAsyncKeyedContextElement(
+                    new StreamRecord<>(Tuple2.of(5, "5")), new TestKeySelector());
+            asyncExecutionController.handleRequest(null, StateRequestType.VALUE_GET, null);
+            testOperator.postProcessElement();
+            assertThat(asyncExecutionController.getInFlightRecordNum()).isEqualTo(1);
+            testOperator.snapshotState(
+                    1,
+                    1,
+                    new CheckpointOptions(CheckpointType.CHECKPOINT, locationReference),
+                    new JobManagerCheckpointStorage()
+                            .createCheckpointStorage(new JobID())
+                            .resolveCheckpointStorageLocation(1, locationReference));
+            assertThat(asyncExecutionController.getInFlightRecordNum()).isEqualTo(0);
+        }
+    }
+
+    @Disabled("Support Timer for AsyncKeyedStateBackend")
+    @Test
+    void testTimerServiceIsAsync() throws Exception {
+        try (KeyedOneInputStreamOperatorV2TestHarness<Integer, Tuple2<Integer, String>, String>
+                testHarness = createTestHarness(128, 1, 0, ElementOrder.RECORD_ORDER)) {
+            testHarness.open();
+            assertThat(testHarness.getBaseOperator())
+                    .isInstanceOf(AbstractAsyncStateStreamOperatorV2.class);
+            Triggerable triggerable =
+                    new Triggerable() {
+                        @Override
+                        public void onEventTime(InternalTimer timer) throws Exception {}
+
+                        @Override
+                        public void onProcessingTime(InternalTimer timer) throws Exception {}
+                    };
+            assertThat(
+                            ((AbstractAsyncStateStreamOperatorV2) testHarness.getBaseOperator())
+                                    .getInternalTimerService(
+                                            "test", VoidNamespaceSerializer.INSTANCE, triggerable))
+                    .isInstanceOf(InternalTimerServiceAsyncImpl.class);
         }
     }
 

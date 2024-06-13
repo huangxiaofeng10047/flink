@@ -18,6 +18,10 @@
 
 package org.apache.flink.runtime.asyncprocessing;
 
+import org.apache.flink.runtime.asyncprocessing.EpochManager.Epoch;
+
+import javax.annotation.Nullable;
+
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -29,7 +33,9 @@ import java.util.function.Consumer;
  *
  * @param <K> The type of the key inside the record.
  */
-public class RecordContext<K> extends ReferenceCounted {
+public class RecordContext<K> extends ReferenceCounted<RecordContext.DisposerRunner> {
+    /** The empty record for timer and non-record input usage. */
+    static final Object EMPTY_RECORD = new Object();
 
     /** The record to be processed. */
     private final Object record;
@@ -42,17 +48,33 @@ public class RecordContext<K> extends ReferenceCounted {
 
     /**
      * The disposer for disposing this context. This should be invoked in {@link
-     * #referenceCountReachedZero()}, which may be called once the ref count reaches zero in any
+     * #referenceCountReachedZero}, which may be called once the ref count reaches zero in any
      * thread.
      */
     private final Consumer<RecordContext<K>> disposer;
 
-    RecordContext(Object record, K key, Consumer<RecordContext<K>> disposer) {
+    /** The keyGroup to which key belongs. */
+    private final int keyGroup;
+
+    /**
+     * The extra context info which is used to hold customized data defined by state backend. The
+     * state backend can use this field to cache some data that can be used multiple times in
+     * different stages of asynchronous state execution.
+     */
+    private @Nullable volatile Object extra;
+
+    /** The epoch of this context. */
+    private final Epoch epoch;
+
+    public RecordContext(
+            Object record, K key, Consumer<RecordContext<K>> disposer, int keyGroup, Epoch epoch) {
         super(0);
         this.record = record;
         this.key = key;
         this.keyOccupied = false;
         this.disposer = disposer;
+        this.keyGroup = keyGroup;
+        this.epoch = epoch;
     }
 
     public Object getRecord() {
@@ -74,11 +96,31 @@ public class RecordContext<K> extends ReferenceCounted {
     }
 
     @Override
-    protected void referenceCountReachedZero() {
+    protected void referenceCountReachedZero(@Nullable DisposerRunner disposerRunner) {
         if (keyOccupied) {
             keyOccupied = false;
-            disposer.accept(this);
+            if (disposerRunner != null) {
+                disposerRunner.runDisposer(() -> disposer.accept(this));
+            } else {
+                disposer.accept(this);
+            }
         }
+    }
+
+    public int getKeyGroup() {
+        return keyGroup;
+    }
+
+    public void setExtra(Object extra) {
+        this.extra = extra;
+    }
+
+    public Object getExtra() {
+        return extra;
+    }
+
+    public Epoch getEpoch() {
+        return epoch;
     }
 
     @Override
@@ -98,6 +140,12 @@ public class RecordContext<K> extends ReferenceCounted {
         if (!Objects.equals(record, that.record)) {
             return false;
         }
+        if (!Objects.equals(keyGroup, that.keyGroup)) {
+            return false;
+        }
+        if (!Objects.equals(epoch, that.epoch)) {
+            return false;
+        }
         return Objects.equals(key, that.key);
     }
 
@@ -112,6 +160,12 @@ public class RecordContext<K> extends ReferenceCounted {
                 + keyOccupied
                 + ", ref="
                 + getReferenceCount()
+                + ", epoch="
+                + epoch.id
                 + "}";
+    }
+
+    public interface DisposerRunner {
+        void runDisposer(Runnable task);
     }
 }

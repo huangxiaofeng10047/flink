@@ -18,10 +18,13 @@
 
 package org.apache.flink.runtime.asyncprocessing;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.state.v2.State;
 import org.apache.flink.core.state.InternalStateFuture;
-import org.apache.flink.util.FlinkRuntimeException;
+import org.apache.flink.core.state.StateFutureImpl.AsyncFrameworkExceptionHandler;
+import org.apache.flink.runtime.asyncprocessing.EpochManager.ParallelMode;
+import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.ThrowingRunnable;
 
@@ -30,7 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -46,18 +49,22 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * @param <K> the type of the key
  */
-public class AsyncExecutionController<K> {
+public class AsyncExecutionController<K> implements StateRequestHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(AsyncExecutionController.class);
-
-    public static final int DEFAULT_BATCH_SIZE = 1000;
-    public static final int DEFAULT_MAX_IN_FLIGHT_RECORD_NUM = 6000;
 
     /**
      * The batch size. When the number of state requests in the active buffer exceeds the batch
      * size, a batched state execution would be triggered.
      */
     private final int batchSize;
+
+    /**
+     * The timeout of {@link StateRequestBuffer#activeQueue} triggering in milliseconds. If the
+     * activeQueue has not reached the {@link #batchSize} within 'buffer-timeout' milliseconds, a
+     * trigger will perform actively.
+     */
+    private final long bufferTimeout;
 
     /** The max allowed number of in-flight records. */
     private final int maxInFlightRecordNum;
@@ -70,6 +77,9 @@ public class AsyncExecutionController<K> {
      */
     private final MailboxExecutor mailboxExecutor;
 
+    /** Exception handler to handle the exception thrown by asynchronous framework. */
+    private final AsyncFrameworkExceptionHandler exceptionHandler;
+
     /** The key accounting unit which is used to detect the key conflict. */
     final KeyAccountingUnit<K> keyAccountingUnit;
 
@@ -80,7 +90,7 @@ public class AsyncExecutionController<K> {
     private final StateFutureFactory<K> stateFutureFactory;
 
     /** The state executor where the {@link StateRequest} is actually executed. */
-    final StateExecutor stateExecutor;
+    private final StateExecutor stateExecutor;
 
     /** The corresponding context that currently runs in task thread. */
     RecordContext<K> currentContext;
@@ -93,27 +103,55 @@ public class AsyncExecutionController<K> {
      */
     final AtomicInteger inFlightRecordNum;
 
-    public AsyncExecutionController(MailboxExecutor mailboxExecutor, StateExecutor stateExecutor) {
-        this(mailboxExecutor, stateExecutor, DEFAULT_BATCH_SIZE, DEFAULT_MAX_IN_FLIGHT_RECORD_NUM);
-    }
+    /** Max parallelism of the job. */
+    private final int maxParallelism;
+
+    /** The reference of epoch manager. */
+    final EpochManager epochManager;
+
+    /**
+     * The parallel mode of epoch execution. Keep this field internal for now, until we could see
+     * the concrete need for {@link ParallelMode#PARALLEL_BETWEEN_EPOCH} from average users.
+     */
+    final ParallelMode epochParallelMode = ParallelMode.SERIAL_BETWEEN_EPOCH;
 
     public AsyncExecutionController(
             MailboxExecutor mailboxExecutor,
+            AsyncFrameworkExceptionHandler exceptionHandler,
             StateExecutor stateExecutor,
+            int maxParallelism,
             int batchSize,
+            long bufferTimeout,
             int maxInFlightRecords) {
         this.keyAccountingUnit = new KeyAccountingUnit<>(maxInFlightRecords);
         this.mailboxExecutor = mailboxExecutor;
-        this.stateFutureFactory = new StateFutureFactory<>(this, mailboxExecutor);
+        this.exceptionHandler = exceptionHandler;
+        this.stateFutureFactory = new StateFutureFactory<>(this, mailboxExecutor, exceptionHandler);
         this.stateExecutor = stateExecutor;
         this.batchSize = batchSize;
+        this.bufferTimeout = bufferTimeout;
         this.maxInFlightRecordNum = maxInFlightRecords;
-        this.stateRequestsBuffer = new StateRequestBuffer<>();
         this.inFlightRecordNum = new AtomicInteger(0);
+        this.maxParallelism = maxParallelism;
+        this.stateRequestsBuffer =
+                new StateRequestBuffer<>(
+                        bufferTimeout,
+                        (scheduledSeq) ->
+                                mailboxExecutor.execute(
+                                        () -> {
+                                            if (stateRequestsBuffer.checkCurrentSeq(scheduledSeq)) {
+                                                triggerIfNeeded(true);
+                                            }
+                                        },
+                                        "AEC-buffer-timeout"));
+
+        this.epochManager = new EpochManager(this);
         LOG.info(
-                "Create AsyncExecutionController: batchSize {}, maxInFlightRecordsNum {}",
-                batchSize,
-                maxInFlightRecords);
+                "Create AsyncExecutionController: batchSize {}, bufferTimeout {}, maxInFlightRecordNum {}, epochParallelMode {}",
+                this.batchSize,
+                this.bufferTimeout,
+                this.maxInFlightRecordNum,
+                this.epochParallelMode);
     }
 
     /**
@@ -125,7 +163,20 @@ public class AsyncExecutionController<K> {
      * @return the built record context.
      */
     public RecordContext<K> buildContext(Object record, K key) {
-        return new RecordContext<>(record, key, this::disposeContext);
+        if (record == null) {
+            return new RecordContext<>(
+                    RecordContext.EMPTY_RECORD,
+                    key,
+                    this::disposeContext,
+                    KeyGroupRangeAssignment.assignToKeyGroup(key, maxParallelism),
+                    epochManager.onRecord());
+        }
+        return new RecordContext<>(
+                record,
+                key,
+                this::disposeContext,
+                KeyGroupRangeAssignment.assignToKeyGroup(key, maxParallelism),
+                epochManager.onRecord());
     }
 
     /**
@@ -143,7 +194,8 @@ public class AsyncExecutionController<K> {
      *
      * @param toDispose the context to dispose.
      */
-    public void disposeContext(RecordContext<K> toDispose) {
+    void disposeContext(RecordContext<K> toDispose) {
+        epochManager.completeOneRecord(toDispose.getEpoch());
         keyAccountingUnit.release(toDispose.getRecord(), toDispose.getKey());
         inFlightRecordNum.decrementAndGet();
         RecordContext<K> nextRecordCtx =
@@ -172,7 +224,7 @@ public class AsyncExecutionController<K> {
     }
 
     /**
-     * Submit a {@link StateRequest} to this AEC and trigger if needed.
+     * Submit a {@link StateRequest} to this AsyncExecutionController and trigger it if needed.
      *
      * @param state the state to request. Could be {@code null} if the type is {@link
      *     StateRequestType#SYNC_POINT}.
@@ -180,6 +232,7 @@ public class AsyncExecutionController<K> {
      * @param payload the payload input for this request.
      * @return the state future.
      */
+    @Override
     public <IN, OUT> InternalStateFuture<OUT> handleRequest(
             @Nullable State state, StateRequestType type, @Nullable IN payload) {
         // Step 1: build state future & assign context.
@@ -215,13 +268,19 @@ public class AsyncExecutionController<K> {
      *
      * @param force whether to trigger requests in force.
      */
-    void triggerIfNeeded(boolean force) {
-        // TODO: introduce a timeout mechanism for triggering.
+    public void triggerIfNeeded(boolean force) {
         if (!force && stateRequestsBuffer.activeQueueSize() < batchSize) {
             return;
         }
-        List<StateRequest<?, ?, ?>> toRun = stateRequestsBuffer.popActive(batchSize);
-        stateExecutor.executeBatchRequests(toRun);
+
+        Optional<StateRequestContainer> toRun =
+                stateRequestsBuffer.popActive(
+                        batchSize, () -> stateExecutor.createStateRequestContainer());
+        if (!toRun.isPresent() || toRun.get().isEmpty()) {
+            return;
+        }
+        stateExecutor.executeBatchRequests(toRun.get());
+        stateRequestsBuffer.advanceSeq();
     }
 
     private void seizeCapacity() {
@@ -235,17 +294,7 @@ public class AsyncExecutionController<K> {
         // 2. If the state request is for a newly entered record, the in-flight record number should
         // be less than the max in-flight record number.
         // Note: the currentContext may be updated by {@code StateFutureFactory#build}.
-        try {
-            while (inFlightRecordNum.get() > maxInFlightRecordNum) {
-                if (!mailboxExecutor.tryYield()) {
-                    triggerIfNeeded(true);
-                    Thread.sleep(1);
-                }
-            }
-        } catch (InterruptedException ignored) {
-            // ignore the interrupted exception to avoid throwing fatal error when the task cancel
-            // or exit.
-        }
+        drainInflightRecords(maxInFlightRecordNum);
         // 3. Ensure the currentContext is restored.
         setCurrentContext(storedContext);
         inFlightRecordNum.incrementAndGet();
@@ -258,15 +307,48 @@ public class AsyncExecutionController<K> {
      * @param callback the callback to run if it finishes (once the record is not blocked).
      */
     public void syncPointRequestWithCallback(ThrowingRunnable<Exception> callback) {
-        handleRequest(null, StateRequestType.SYNC_POINT, null)
-                .thenAccept(
-                        v -> {
-                            try {
-                                callback.run();
-                            } catch (Exception e) {
-                                // TODO: Properly handle the exception and fail the entire job.
-                                throw new FlinkRuntimeException("Unexpected runtime exception", e);
-                            }
-                        });
+        handleRequest(null, StateRequestType.SYNC_POINT, null).thenAccept(v -> callback.run());
+    }
+
+    /**
+     * A helper function to drain in-flight records util {@link #inFlightRecordNum} within the limit
+     * of given {@code targetNum}.
+     *
+     * @param targetNum the target {@link #inFlightRecordNum} to achieve.
+     */
+    public void drainInflightRecords(int targetNum) {
+        try {
+            while (inFlightRecordNum.get() > targetNum) {
+                if (!mailboxExecutor.tryYield()) {
+                    triggerIfNeeded(true);
+                    Thread.sleep(1);
+                }
+            }
+        } catch (InterruptedException ignored) {
+            // ignore the interrupted exception to avoid throwing fatal error when the task cancel
+            // or exit.
+        }
+    }
+
+    public void processNonRecord(ThrowingRunnable<? extends Exception> action) {
+        Runnable wrappedAction =
+                () -> {
+                    try {
+                        action.run();
+                    } catch (Exception e) {
+                        exceptionHandler.handleException("Failed to process non-record.", e);
+                    }
+                };
+        epochManager.onNonRecord(wrappedAction, epochParallelMode);
+    }
+
+    @VisibleForTesting
+    public StateExecutor getStateExecutor() {
+        return stateExecutor;
+    }
+
+    @VisibleForTesting
+    public int getInFlightRecordNum() {
+        return inFlightRecordNum.get();
     }
 }

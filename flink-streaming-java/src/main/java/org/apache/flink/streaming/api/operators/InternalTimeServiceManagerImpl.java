@@ -23,6 +23,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.runtime.asyncprocessing.AsyncExecutionController;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
 import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
 import org.apache.flink.runtime.state.KeyGroupRange;
@@ -179,6 +180,54 @@ public class InternalTimeServiceManagerImpl<K> implements InternalTimeServiceMan
         return timerService;
     }
 
+    @Override
+    public <N> InternalTimerService<N> getAsyncInternalTimerService(
+            String name,
+            TypeSerializer<K> keySerializer,
+            TypeSerializer<N> namespaceSerializer,
+            Triggerable<K, N> triggerable,
+            AsyncExecutionController<K> asyncExecutionController) {
+        checkNotNull(keySerializer, "Timers can only be used on keyed operators.");
+
+        // the following casting is to overcome type restrictions.
+        TimerSerializer<K, N> timerSerializer =
+                new TimerSerializer<>(keySerializer, namespaceSerializer);
+
+        InternalTimerServiceAsyncImpl<K, N> timerService =
+                registerOrGetAsyncTimerService(name, timerSerializer, asyncExecutionController);
+
+        timerService.startTimerService(
+                timerSerializer.getKeySerializer(),
+                timerSerializer.getNamespaceSerializer(),
+                triggerable);
+
+        return timerService;
+    }
+
+    <N> InternalTimerServiceAsyncImpl<K, N> registerOrGetAsyncTimerService(
+            String name,
+            TimerSerializer<K, N> timerSerializer,
+            AsyncExecutionController<K> asyncExecutionController) {
+        InternalTimerServiceAsyncImpl<K, N> timerService =
+                (InternalTimerServiceAsyncImpl<K, N>) timerServices.get(name);
+        if (timerService == null) {
+            timerService =
+                    new InternalTimerServiceAsyncImpl<>(
+                            taskIOMetricGroup,
+                            localKeyGroupRange,
+                            keyContext,
+                            processingTimeService,
+                            createTimerPriorityQueue(
+                                    PROCESSING_TIMER_PREFIX + name, timerSerializer),
+                            createTimerPriorityQueue(EVENT_TIMER_PREFIX + name, timerSerializer),
+                            cancellationContext,
+                            asyncExecutionController);
+
+            timerServices.put(name, timerService);
+        }
+        return timerService;
+    }
+
     Map<String, InternalTimerServiceImpl<K, ?>> getRegisteredTimerServices() {
         return Collections.unmodifiableMap(timerServices);
     }
@@ -194,6 +243,17 @@ public class InternalTimeServiceManagerImpl<K> implements InternalTimeServiceMan
         for (InternalTimerServiceImpl<?, ?> service : timerServices.values()) {
             service.advanceWatermark(watermark.getTimestamp());
         }
+    }
+
+    @Override
+    public boolean tryAdvanceWatermark(
+            Watermark watermark, ShouldStopAdvancingFn shouldStopAdvancingFn) throws Exception {
+        for (InternalTimerServiceImpl<?, ?> service : timerServices.values()) {
+            if (!service.tryAdvanceWatermark(watermark.getTimestamp(), shouldStopAdvancingFn)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     //////////////////				Fault Tolerance Methods				///////////////////

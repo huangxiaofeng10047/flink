@@ -18,16 +18,23 @@
 
 package org.apache.flink.runtime.asyncprocessing;
 
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
+
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * A buffer to hold state requests to execute state requests in batch, which can only be manipulated
@@ -37,6 +44,18 @@ import java.util.Map;
  */
 @NotThreadSafe
 public class StateRequestBuffer<K> {
+
+    /** All StateRequestBuffer in the same task manager share one ScheduledExecutorService. */
+    private static final ScheduledThreadPoolExecutor DELAYER =
+            new ScheduledThreadPoolExecutor(
+                    1, new ExecutorThreadFactory("StateRequestBuffer-timeout-scheduler"));
+
+    static {
+        DELAYER.setRemoveOnCancelPolicy(true);
+        DELAYER.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+        DELAYER.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+    }
+
     /**
      * The state requests in this buffer could be executed when the buffer is full or configured
      * batch size is reached. All operations on this buffer must be invoked in task thread.
@@ -53,10 +72,52 @@ public class StateRequestBuffer<K> {
     /** The number of state requests in blocking queue. */
     int blockingQueueSize;
 
-    public StateRequestBuffer() {
+    /** The timeout of {@link #activeQueue} triggering in milliseconds. */
+    final long bufferTimeout;
+
+    /** The handler to trigger when timeout. */
+    final Consumer<Long> timeoutHandler;
+
+    /** The executor service that schedules and calls the triggers of this task. */
+    ScheduledExecutorService scheduledExecutor;
+
+    /**
+     * The current scheduled future, when the next scheduling occurs, the previous one that has not
+     * yet been executed will be canceled.
+     */
+    ScheduledFuture<Void> currentScheduledFuture;
+
+    /**
+     * The current scheduled trigger sequence number, a timeout trigger is scheduled only if {@code
+     * scheduledSeq} is less than {@code currentSeq}.
+     */
+    AtomicLong scheduledSeq;
+
+    /**
+     * The current trigger sequence number, used to distinguish different triggers. Every time a
+     * trigger occurs, {@code currentSeq} increases by 1.
+     */
+    AtomicLong currentSeq;
+
+    public StateRequestBuffer(long bufferTimeout, Consumer<Long> timeoutHandler) {
         this.activeQueue = new LinkedList<>();
         this.blockingQueue = new HashMap<>();
         this.blockingQueueSize = 0;
+        this.bufferTimeout = bufferTimeout;
+        this.timeoutHandler = timeoutHandler;
+        this.scheduledSeq = new AtomicLong(-1);
+        this.currentSeq = new AtomicLong(0);
+        if (bufferTimeout > 0) {
+            this.scheduledExecutor = DELAYER;
+        }
+    }
+
+    void advanceSeq() {
+        currentSeq.incrementAndGet();
+    }
+
+    boolean checkCurrentSeq(long seq) {
+        return currentSeq.get() == seq;
     }
 
     void enqueueToActive(StateRequest<K, ?, ?> request) {
@@ -64,6 +125,25 @@ public class StateRequestBuffer<K> {
             request.getFuture().complete(null);
         } else {
             activeQueue.add(request);
+            if (bufferTimeout > 0 && currentSeq.get() > scheduledSeq.get()) {
+                if (currentScheduledFuture != null
+                        && !currentScheduledFuture.isDone()
+                        && !currentScheduledFuture.isCancelled()) {
+                    currentScheduledFuture.cancel(false);
+                }
+                final long thisScheduledSeq = currentSeq.get();
+                scheduledSeq.set(thisScheduledSeq);
+                currentScheduledFuture =
+                        (ScheduledFuture<Void>)
+                                scheduledExecutor.schedule(
+                                        () -> {
+                                            if (thisScheduledSeq == currentSeq.get()) {
+                                                timeoutHandler.accept(thisScheduledSeq);
+                                            }
+                                        },
+                                        bufferTimeout,
+                                        TimeUnit.MILLISECONDS);
+            }
         }
     }
 
@@ -117,18 +197,20 @@ public class StateRequestBuffer<K> {
      * Try to pop state requests from active queue, if the size of active queue is less than N,
      * return all the requests in active queue.
      *
-     * @param n the number of state requests to pop.
-     * @return A list of state requests.
+     * @param n The number of state requests to pop.
+     * @param requestContainerInitializer Initializer for the stateRequest container
+     * @return A StateRequestContainer which holds the popped state requests.
      */
-    List<StateRequest<?, ?, ?>> popActive(int n) {
+    Optional<StateRequestContainer> popActive(
+            int n, Supplier<StateRequestContainer> requestContainerInitializer) {
         final int count = Math.min(n, activeQueue.size());
         if (count <= 0) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
-        ArrayList<StateRequest<?, ?, ?>> ret = new ArrayList<>(count);
+        StateRequestContainer stateRequestContainer = requestContainerInitializer.get();
         for (int i = 0; i < count; i++) {
-            ret.add(activeQueue.pop());
+            stateRequestContainer.offer(activeQueue.pop());
         }
-        return ret;
+        return Optional.of(stateRequestContainer);
     }
 }
