@@ -1,7 +1,7 @@
 {
   "flinkVersion" : "",
   "nodes" : [ {
-    "id" : 1,
+    "id" : 0,
     "type" : "stream-exec-table-source-scan_1",
     "scanTableSource" : {
       "table" : {
@@ -22,17 +22,18 @@
           },
           "partitionKeys" : [ ],
           "options" : {
-            "bounded" : "false",
-            "connector" : "values"
+            "bounded" : "true",
+            "connector" : "values",
+            "scan.parallelism" : "2"
           }
         }
       }
     },
     "outputType" : "ROW<`a` BIGINT, `b` INT, `c` VARCHAR(2147483647)>",
-    "description" : "TableSourceScan(table=[[default_catalog, default_database, MyTable]], fields=[a, b, c])",
+    "description" : "TableSourceScan(table=[[default_catalog, default_database, MyTable]], fields=[a, b, c], hints=[[[OPTIONS options:{scan.parallelism=2, bounded=true}]]])",
     "inputProperties" : [ ]
   }, {
-    "id" : 2,
+    "id" : 0,
     "type" : "stream-exec-sink_1",
     "configuration" : {
       "table.exec.sink.keyed-shuffle" : "AUTO",
@@ -78,8 +79,8 @@
     "description" : "Sink(table=[default_catalog.default_database.MySink], fields=[a, b, c])"
   } ],
   "edges" : [ {
-    "source" : 1,
-    "target" : 2,
+    "source" : 0,
+    "target" : 0,
     "shuffle" : {
       "type" : "FORWARD"
     },
