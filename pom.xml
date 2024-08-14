@@ -129,7 +129,7 @@ under the License.
 		<flink.shaded.jackson.version>2.15.3</flink.shaded.jackson.version>
 		<flink.shaded.jsonpath.version>2.7.0</flink.shaded.jsonpath.version>
 		<flink.markBundledAsOptional>true</flink.markBundledAsOptional>
-		<target.java.version>17</target.java.version>
+		<target.java.version>1.8</target.java.version>
 		<slf4j.version>1.7.36</slf4j.version>
 		<log4j.version>2.17.1</log4j.version>
 		<!-- Overwrite default values from parent pom.
@@ -1457,7 +1457,7 @@ under the License.
 				</property>
 			</activation>
 			<properties>
-				<target.java.version>17</target.java.version>
+				<target.java.version>1.8</target.java.version>
 			</properties>
 			<build>
 				<plugins>
