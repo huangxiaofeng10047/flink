@@ -16,19 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.operations;
+package org.apache.flink.util.clock;
 
-import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.PublicEvolving;
 
-/** Like types enums. */
-@Internal
-public enum LikeType {
-    /** case-sensitive to match a pattern. */
-    LIKE,
-    /** case-insensitive to match a pattern. */
-    ILIKE;
+/**
+ * A clock that gives access to relative time, similar to System#nanoTime(), however the progress of
+ * the relative time doesn't have to reflect the progress of a wall clock. Concrete classes can
+ * specify a different contract in that regard. Returned time must be monotonically increasing.
+ */
+@PublicEvolving
+public interface RelativeClock {
+    /** Gets the current relative time, in milliseconds. */
+    long relativeTimeMillis();
 
-    public static LikeType of(String type) {
-        return LikeType.valueOf(type.toUpperCase());
-    }
+    /** Gets the current relative time, in nanoseconds. */
+    long relativeTimeNanos();
 }
