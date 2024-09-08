@@ -27,6 +27,7 @@ import org.apache.flink.runtime.asyncprocessing.StateExecutor;
 import org.apache.flink.runtime.asyncprocessing.StateRequestHandler;
 import org.apache.flink.runtime.state.AsyncKeyedStateBackend;
 import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
+import org.apache.flink.runtime.state.v2.ListStateDescriptor;
 import org.apache.flink.runtime.state.v2.StateDescriptor;
 import org.apache.flink.runtime.state.v2.ValueStateDescriptor;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -56,6 +57,9 @@ import java.util.function.Supplier;
 public class ForStKeyedStateBackend<K> implements AsyncKeyedStateBackend {
 
     private static final Logger LOG = LoggerFactory.getLogger(ForStKeyedStateBackend.class);
+
+    /** Number of bytes required to prefix the key groups. */
+    private final int keyGroupPrefixBytes;
 
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
@@ -111,6 +115,7 @@ public class ForStKeyedStateBackend<K> implements AsyncKeyedStateBackend {
 
     public ForStKeyedStateBackend(
             ForStResourceContainer optionsContainer,
+            int keyGroupPrefixBytes,
             TypeSerializer<K> keySerializer,
             Supplier<SerializedCompositeKeyBuilder<K>> serializedKeyBuilder,
             Supplier<DataOutputSerializer> valueSerializerView,
@@ -120,6 +125,7 @@ public class ForStKeyedStateBackend<K> implements AsyncKeyedStateBackend {
             ColumnFamilyHandle defaultColumnFamilyHandle,
             ForStNativeMetricMonitor nativeMetricMonitor) {
         this.optionsContainer = Preconditions.checkNotNull(optionsContainer);
+        this.keyGroupPrefixBytes = keyGroupPrefixBytes;
         this.keySerializer = keySerializer;
         this.serializedKeyBuilder = serializedKeyBuilder;
         this.valueSerializerView = valueSerializerView;
@@ -140,26 +146,55 @@ public class ForStKeyedStateBackend<K> implements AsyncKeyedStateBackend {
     @Override
     @SuppressWarnings("unchecked")
     public <N, S extends State, SV> S createState(
-            TypeSerializer<N> namespaceSerializer, @Nonnull StateDescriptor<SV> stateDesc) {
+            @Nonnull N defaultNamespace,
+            @Nonnull TypeSerializer<N> namespaceSerializer,
+            @Nonnull StateDescriptor<SV> stateDesc) {
         Preconditions.checkNotNull(
                 stateRequestHandler,
                 "A non-null stateRequestHandler must be setup before createState");
         ColumnFamilyHandle columnFamilyHandle =
                 ForStOperationUtils.createColumnFamilyHandle(
                         stateDesc.getStateId(), db, columnFamilyOptionsFactory);
-        if (stateDesc.getType() == StateDescriptor.Type.VALUE) {
-            return (S)
-                    new ForStValueState<>(
-                            stateRequestHandler,
-                            columnFamilyHandle,
-                            (ValueStateDescriptor<SV>) stateDesc,
-                            serializedKeyBuilder,
-                            namespaceSerializer::duplicate,
-                            valueSerializerView,
-                            valueDeserializerView);
+        switch (stateDesc.getType()) {
+            case VALUE:
+                return (S)
+                        new ForStValueState<>(
+                                stateRequestHandler,
+                                columnFamilyHandle,
+                                (ValueStateDescriptor<SV>) stateDesc,
+                                serializedKeyBuilder,
+                                defaultNamespace,
+                                namespaceSerializer::duplicate,
+                                valueSerializerView,
+                                valueDeserializerView);
+            case LIST:
+                return (S)
+                        new ForStListState<>(
+                                stateRequestHandler,
+                                columnFamilyHandle,
+                                (ListStateDescriptor<SV>) stateDesc,
+                                serializedKeyBuilder,
+                                defaultNamespace,
+                                namespaceSerializer::duplicate,
+                                valueSerializerView,
+                                valueDeserializerView);
+            case MAP:
+                Supplier<DataInputDeserializer> keyDeserializerView = DataInputDeserializer::new;
+                return ForStMapState.create(
+                        stateDesc,
+                        stateRequestHandler,
+                        columnFamilyHandle,
+                        serializedKeyBuilder,
+                        defaultNamespace,
+                        namespaceSerializer::duplicate,
+                        valueSerializerView,
+                        keyDeserializerView,
+                        valueDeserializerView,
+                        keyGroupPrefixBytes);
+            default:
+                throw new UnsupportedOperationException(
+                        String.format("Unsupported state type: %s", stateDesc.getType()));
         }
-        throw new UnsupportedOperationException(
-                String.format("Unsupported state type: %s", stateDesc.getType()));
     }
 
     @Override

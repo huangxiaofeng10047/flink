@@ -19,8 +19,6 @@
 package org.apache.flink.state.forst;
 
 import org.rocksdb.RocksDB;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -34,16 +32,14 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class ForStGeneralMultiGetOperation implements ForStDBOperation {
 
-    private static final Logger LOG = LoggerFactory.getLogger(ForStGeneralMultiGetOperation.class);
-
     private final RocksDB db;
 
-    private final List<ForStDBGetRequest<?, ?, ?>> batchRequest;
+    private final List<ForStDBGetRequest<?, ?, ?, ?>> batchRequest;
 
     private final Executor executor;
 
     ForStGeneralMultiGetOperation(
-            RocksDB db, List<ForStDBGetRequest<?, ?, ?>> batchRequest, Executor executor) {
+            RocksDB db, List<ForStDBGetRequest<?, ?, ?, ?>> batchRequest, Executor executor) {
         this.db = db;
         this.batchRequest = batchRequest;
         this.executor = executor;
@@ -58,14 +54,12 @@ public class ForStGeneralMultiGetOperation implements ForStDBOperation {
         AtomicReference<Exception> error = new AtomicReference<>();
         AtomicInteger counter = new AtomicInteger(batchRequest.size());
         for (int i = 0; i < batchRequest.size(); i++) {
-            ForStDBGetRequest<?, ?, ?> request = batchRequest.get(i);
+            ForStDBGetRequest<?, ?, ?, ?> request = batchRequest.get(i);
             executor.execute(
                     () -> {
                         try {
                             if (error.get() == null) {
-                                byte[] key = request.buildSerializedKey();
-                                byte[] value = db.get(request.getColumnFamilyHandle(), key);
-                                request.completeStateFuture(value);
+                                request.process(db);
                             } else {
                                 request.completeStateFutureExceptionally(
                                         "Error already occurred in other state request of the same "

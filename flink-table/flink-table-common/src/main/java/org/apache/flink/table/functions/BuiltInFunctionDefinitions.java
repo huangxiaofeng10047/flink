@@ -90,6 +90,7 @@ import static org.apache.flink.table.types.inference.InputTypeStrategies.varying
 import static org.apache.flink.table.types.inference.InputTypeStrategies.wildcardWithCount;
 import static org.apache.flink.table.types.inference.TypeStrategies.COMMON;
 import static org.apache.flink.table.types.inference.TypeStrategies.argument;
+import static org.apache.flink.table.types.inference.TypeStrategies.commonRange;
 import static org.apache.flink.table.types.inference.TypeStrategies.explicit;
 import static org.apache.flink.table.types.inference.TypeStrategies.first;
 import static org.apache.flink.table.types.inference.TypeStrategies.forceNullable;
@@ -99,6 +100,7 @@ import static org.apache.flink.table.types.inference.TypeStrategies.nullableIfAr
 import static org.apache.flink.table.types.inference.TypeStrategies.varyingString;
 import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.ARRAY_ELEMENT_ARG;
 import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.ARRAY_FULLY_COMPARABLE;
+import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.INDEX;
 import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.JSON_ARGUMENT;
 import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.TWO_EQUALS_COMPARABLE;
 import static org.apache.flink.table.types.inference.strategies.SpecificInputTypeStrategies.TWO_FULLY_COMPARABLE;
@@ -884,13 +886,18 @@ public final class BuiltInFunctionDefinitions {
 
     public static final BuiltInFunctionDefinition LIKE =
             BuiltInFunctionDefinition.newBuilder()
-                    .name("like")
-                    .callSyntax("LIKE", SqlCallSyntax.BINARY_OP)
+                    .name("LIKE")
+                    .callSyntax("LIKE", SqlCallSyntax.LIKE)
                     .kind(SCALAR)
                     .inputTypeStrategy(
-                            sequence(
-                                    logical(LogicalTypeFamily.CHARACTER_STRING),
-                                    logical(LogicalTypeFamily.CHARACTER_STRING)))
+                            or(
+                                    sequence(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING)),
+                                    sequence(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
                     .build();
 
@@ -922,6 +929,48 @@ public final class BuiltInFunctionDefinitions {
                                     logical(LogicalTypeFamily.CHARACTER_STRING),
                                     logical(LogicalTypeFamily.CHARACTER_STRING)))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .build();
+
+    public static final BuiltInFunctionDefinition STARTS_WITH =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("STARTSWITH")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            or(
+                                    sequence(
+                                            Arrays.asList("expr", "startExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING))),
+                                    sequence(
+                                            Arrays.asList("expr", "startExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.BINARY_STRING),
+                                                    logical(LogicalTypeFamily.BINARY_STRING)))))
+                    .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.StartsWithFunction")
+                    .build();
+
+    public static final BuiltInFunctionDefinition ENDS_WITH =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("ENDSWITH")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            or(
+                                    sequence(
+                                            Arrays.asList("expr", "endExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING))),
+                                    sequence(
+                                            Arrays.asList("expr", "endExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.BINARY_STRING),
+                                                    logical(LogicalTypeFamily.BINARY_STRING)))))
+                    .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.EndsWithFunction")
                     .build();
 
     public static final BuiltInFunctionDefinition SUBSTRING =
@@ -1108,6 +1157,21 @@ public final class BuiltInFunctionDefinitions {
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.STRING())))
                     .build();
 
+    public static final BuiltInFunctionDefinition REGEXP_COUNT =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("REGEXP_COUNT")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            sequence(
+                                    Arrays.asList("str", "regex"),
+                                    Arrays.asList(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
+                    .outputTypeStrategy(explicit(DataTypes.INT()))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.RegexpCountFunction")
+                    .build();
+
     public static final BuiltInFunctionDefinition REGEXP_EXTRACT =
             BuiltInFunctionDefinition.newBuilder()
                     .name("regexpExtract")
@@ -1123,6 +1187,58 @@ public final class BuiltInFunctionDefinitions {
                                             logical(LogicalTypeFamily.CHARACTER_STRING),
                                             logical(LogicalTypeRoot.INTEGER))))
                     .outputTypeStrategy(explicit(DataTypes.STRING().nullable()))
+                    .build();
+
+    public static final BuiltInFunctionDefinition REGEXP_EXTRACT_ALL =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("REGEXP_EXTRACT_ALL")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            or(
+                                    sequence(
+                                            Arrays.asList("str", "regex"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING))),
+                                    sequence(
+                                            Arrays.asList("str", "regex", "extractIndex"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.INTEGER_NUMERIC)))))
+                    .outputTypeStrategy(explicit(DataTypes.ARRAY(DataTypes.STRING())))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.RegexpExtractAllFunction")
+                    .build();
+
+    public static final BuiltInFunctionDefinition REGEXP_INSTR =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("REGEXP_INSTR")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            sequence(
+                                    Arrays.asList("str", "regex"),
+                                    Arrays.asList(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
+                    .outputTypeStrategy(explicit(DataTypes.INT()))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.RegexpInstrFunction")
+                    .build();
+
+    public static final BuiltInFunctionDefinition REGEXP_SUBSTR =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("REGEXP_SUBSTR")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            sequence(
+                                    Arrays.asList("str", "regex"),
+                                    Arrays.asList(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
+                    .outputTypeStrategy(explicit(DataTypes.STRING()))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.RegexpSubstrFunction")
                     .build();
 
     public static final BuiltInFunctionDefinition JSON_QUOTE =
@@ -1143,6 +1259,7 @@ public final class BuiltInFunctionDefinitions {
                     .runtimeClass(
                             "org.apache.flink.table.runtime.functions.scalar.JsonUnquoteFunction")
                     .build();
+
     public static final BuiltInFunctionDefinition FROM_BASE64 =
             BuiltInFunctionDefinition.newBuilder()
                     .name("fromBase64")
@@ -1260,6 +1377,19 @@ public final class BuiltInFunctionDefinitions {
                                             logical(LogicalTypeFamily.CHARACTER_STRING),
                                             logical(LogicalTypeFamily.CHARACTER_STRING))))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.STRING())))
+                    .build();
+
+    public static final BuiltInFunctionDefinition PRINTF =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("PRINTF")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            varyingSequence(
+                                    Arrays.asList("format", "obj"),
+                                    Arrays.asList(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING), ANY)))
+                    .outputTypeStrategy(explicit(DataTypes.STRING()))
+                    .runtimeClass("org.apache.flink.table.runtime.functions.scalar.PrintfFunction")
                     .build();
 
     public static final BuiltInFunctionDefinition UUID =
@@ -1385,6 +1515,37 @@ public final class BuiltInFunctionDefinitions {
                             nullableIfArgs(
                                     explicit(
                                             DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()))))
+                    .build();
+
+    public static final BuiltInFunctionDefinition ELT =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("ELT")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            compositeSequence()
+                                    .argument("index", INDEX)
+                                    .finishWithVarying(
+                                            or(
+                                                    varyingSequence(
+                                                            Arrays.asList("expr", "exprs"),
+                                                            Arrays.asList(
+                                                                    logical(
+                                                                            LogicalTypeFamily
+                                                                                    .CHARACTER_STRING),
+                                                                    logical(
+                                                                            LogicalTypeFamily
+                                                                                    .CHARACTER_STRING))),
+                                                    varyingSequence(
+                                                            Arrays.asList("expr", "exprs"),
+                                                            Arrays.asList(
+                                                                    logical(
+                                                                            LogicalTypeFamily
+                                                                                    .BINARY_STRING),
+                                                                    logical(
+                                                                            LogicalTypeFamily
+                                                                                    .BINARY_STRING))))))
+                    .outputTypeStrategy(forceNullable(commonRange(ConstantArgumentCount.from(1))))
+                    .runtimeClass("org.apache.flink.table.runtime.functions.scalar.EltFunction")
                     .build();
 
     // --------------------------------------------------------------------------------------------
@@ -1872,6 +2033,19 @@ public final class BuiltInFunctionDefinitions {
                                     sequence(logical(LogicalTypeFamily.INTEGER_NUMERIC)),
                                     sequence(logical(LogicalTypeFamily.CHARACTER_STRING))))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.STRING())))
+                    .build();
+
+    public static final BuiltInFunctionDefinition UNHEX =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("UNHEX")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            sequence(
+                                    Collections.singletonList("expr"),
+                                    Collections.singletonList(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
+                    .outputTypeStrategy(explicit(DataTypes.BYTES()))
+                    .runtimeClass("org.apache.flink.table.runtime.functions.scalar.UnhexFunction")
                     .build();
 
     public static final BuiltInFunctionDefinition TRUNCATE =

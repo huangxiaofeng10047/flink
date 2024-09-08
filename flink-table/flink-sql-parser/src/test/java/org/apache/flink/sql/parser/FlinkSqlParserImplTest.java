@@ -2301,6 +2301,38 @@ class FlinkSqlParserImplTest extends SqlParserTest {
     @Test
     void testShowViews() {
         sql("show views").ok("SHOW VIEWS");
+        sql("show views not like '%'").ok("SHOW VIEWS NOT LIKE '%'");
+
+        sql("show views from db1").ok("SHOW VIEWS FROM `DB1`");
+        sql("show views in db1").ok("SHOW VIEWS IN `DB1`");
+
+        sql("show views from catalog1.db1").ok("SHOW VIEWS FROM `CATALOG1`.`DB1`");
+        sql("show views in catalog1.db1").ok("SHOW VIEWS IN `CATALOG1`.`DB1`");
+
+        sql("show views from db1 like '%'").ok("SHOW VIEWS FROM `DB1` LIKE '%'");
+        sql("show views in db1 like '%'").ok("SHOW VIEWS IN `DB1` LIKE '%'");
+
+        sql("show views from catalog1.db1 like '%'")
+                .ok("SHOW VIEWS FROM `CATALOG1`.`DB1` LIKE '%'");
+        sql("show views in catalog1.db1 like '%'").ok("SHOW VIEWS IN `CATALOG1`.`DB1` LIKE '%'");
+
+        sql("show views from db1 not like '%'").ok("SHOW VIEWS FROM `DB1` NOT LIKE '%'");
+        sql("show views in db1 not like '%'").ok("SHOW VIEWS IN `DB1` NOT LIKE '%'");
+
+        sql("show views from catalog1.db1 not like '%'")
+                .ok("SHOW VIEWS FROM `CATALOG1`.`DB1` NOT LIKE '%'");
+        sql("show views in catalog1.db1 not like '%'")
+                .ok("SHOW VIEWS IN `CATALOG1`.`DB1` NOT LIKE '%'");
+
+        sql("show views ^db1^").fails("(?s).*Encountered \"db1\" at line 1, column 12.\n.*");
+        sql("show views ^catalog1^.db1")
+                .fails("(?s).*Encountered \"catalog1\" at line 1, column 12.\n.*");
+
+        sql("show views ^search^ db1")
+                .fails("(?s).*Encountered \"search\" at line 1, column 12.\n.*");
+
+        sql("show views from db1 ^likes^ '%t'")
+                .fails("(?s).*Encountered \"likes\" at line 1, column 21.\n.*");
     }
 
     @Test
@@ -2912,17 +2944,11 @@ class FlinkSqlParserImplTest extends SqlParserTest {
 
         // test replace table as select with explicit columns
         sql("REPLACE TABLE t (col1 string) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "REPLACE TABLE AS SELECT syntax does not support to specify explicit columns yet."));
+                .node(new ValidationMatcher().ok());
 
         // test replace table as select with watermark
         sql("REPLACE TABLE t (watermark FOR ts AS ts - interval '3' second) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "REPLACE TABLE AS SELECT syntax does not support to specify explicit watermark yet."));
+                .node(new ValidationMatcher().ok());
 
         // test replace table as select with constraints
         sql("REPLACE TABLE t (PRIMARY KEY (col1)) WITH ('test' = 'zm') AS SELECT col1 FROM b")
@@ -2941,17 +2967,11 @@ class FlinkSqlParserImplTest extends SqlParserTest {
 
         // test replace table as select with partition key
         sql("REPLACE TABLE t PARTITIONED BY(col1) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "REPLACE TABLE AS SELECT syntax does not support to create partitioned table yet."));
+                .node(new ValidationMatcher().ok());
 
         // test replace table as select with distribution
         sql("REPLACE TABLE t DISTRIBUTED BY(col1) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "REPLACE TABLE AS SELECT syntax does not support creating distributed tables yet."));
+                .node(new ValidationMatcher().ok());
     }
 
     @Test
@@ -2978,17 +2998,12 @@ class FlinkSqlParserImplTest extends SqlParserTest {
 
         // test create or replace table as select with explicit columns
         sql("CREATE OR REPLACE TABLE t (col1 string) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "CREATE OR REPLACE TABLE AS SELECT syntax does not support to specify explicit columns yet."));
+                .node(new ValidationMatcher().ok());
 
         // test create or replace table as select with watermark
         sql("CREATE OR REPLACE TABLE t (watermark FOR ts AS ts - interval '3' second) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "CREATE OR REPLACE TABLE AS SELECT syntax does not support to specify explicit watermark yet."));
+                .node(new ValidationMatcher().ok());
+
         // test create or replace table as select with constraints
         sql("CREATE OR REPLACE TABLE t (PRIMARY KEY (col1)) WITH ('test' = 'zm') AS SELECT col1 FROM b")
                 .node(
@@ -3006,16 +3021,10 @@ class FlinkSqlParserImplTest extends SqlParserTest {
 
         // test create or replace table as select with partition key
         sql("CREATE OR REPLACE TABLE t PARTITIONED BY(col1) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "CREATE OR REPLACE TABLE AS SELECT syntax does not support to create partitioned table yet."));
+                .node(new ValidationMatcher().ok());
 
         sql("CREATE OR REPLACE TABLE t DISTRIBUTED BY(col1) WITH ('test' = 'zm') AS SELECT col1 FROM b")
-                .node(
-                        new ValidationMatcher()
-                                .fails(
-                                        "CREATE OR REPLACE TABLE AS SELECT syntax does not support creating distributed tables yet."));
+                .node(new ValidationMatcher().ok());
     }
 
     @Test

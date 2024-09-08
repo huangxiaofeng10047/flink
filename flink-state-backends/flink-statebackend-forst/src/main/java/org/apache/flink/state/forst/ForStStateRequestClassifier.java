@@ -31,13 +31,16 @@ import java.util.List;
  */
 public class ForStStateRequestClassifier implements StateRequestContainer {
 
-    private final List<ForStDBGetRequest<?, ?, ?>> dbGetRequests;
+    private final List<ForStDBGetRequest<?, ?, ?, ?>> dbGetRequests;
 
     private final List<ForStDBPutRequest<?, ?, ?>> dbPutRequests;
+
+    private final List<ForStDBIterRequest<?, ?, ?, ?, ?>> dbIterRequests;
 
     public ForStStateRequestClassifier() {
         this.dbGetRequests = new ArrayList<>();
         this.dbPutRequests = new ArrayList<>();
+        this.dbIterRequests = new ArrayList<>();
     }
 
     @Override
@@ -47,7 +50,7 @@ public class ForStStateRequestClassifier implements StateRequestContainer {
 
     @Override
     public boolean isEmpty() {
-        return dbGetRequests.isEmpty() && dbPutRequests.isEmpty();
+        return dbGetRequests.isEmpty() && dbPutRequests.isEmpty() && dbIterRequests.isEmpty();
     }
 
     @SuppressWarnings("ConstantConditions")
@@ -55,25 +58,56 @@ public class ForStStateRequestClassifier implements StateRequestContainer {
         StateRequestType stateRequestType = stateRequest.getRequestType();
         switch (stateRequestType) {
             case VALUE_GET:
+            case LIST_GET:
+            case MAP_GET:
+            case MAP_IS_EMPTY:
+            case MAP_CONTAINS:
                 {
-                    ForStValueState<?, ?, ?> forStValueState =
-                            (ForStValueState<?, ?, ?>) stateRequest.getState();
-                    dbGetRequests.add(forStValueState.buildDBGetRequest(stateRequest));
+                    ForStInnerTable<?, ?, ?> innerTable =
+                            (ForStInnerTable<?, ?, ?>) stateRequest.getState();
+                    dbGetRequests.add(innerTable.buildDBGetRequest(stateRequest));
                     return;
                 }
             case VALUE_UPDATE:
+            case LIST_UPDATE:
+            case LIST_ADD:
+            case LIST_ADD_ALL:
+            case MAP_PUT:
+            case MAP_REMOVE:
                 {
-                    ForStValueState<?, ?, ?> forStValueState =
-                            (ForStValueState<?, ?, ?>) stateRequest.getState();
-                    dbPutRequests.add(forStValueState.buildDBPutRequest(stateRequest));
+                    ForStInnerTable<?, ?, ?> innerTable =
+                            (ForStInnerTable<?, ?, ?>) stateRequest.getState();
+                    dbPutRequests.add(innerTable.buildDBPutRequest(stateRequest));
+                    return;
+                }
+            case MAP_ITER:
+            case MAP_ITER_KEY:
+            case MAP_ITER_VALUE:
+            case ITERATOR_LOADING:
+                {
+                    ForStMapState<?, ?, ?, ?> forStMapState =
+                            (ForStMapState<?, ?, ?, ?>) stateRequest.getState();
+                    dbIterRequests.add(forStMapState.buildDBIterRequest(stateRequest));
+                    return;
+                }
+            case MAP_PUT_ALL:
+                {
+                    ForStMapState<?, ?, ?, ?> forStMapState =
+                            (ForStMapState<?, ?, ?, ?>) stateRequest.getState();
+                    dbPutRequests.add(forStMapState.buildDBBunchPutRequest(stateRequest));
                     return;
                 }
             case CLEAR:
                 {
-                    if (stateRequest.getState() instanceof ForStValueState) {
-                        ForStValueState<?, ?, ?> forStValueState =
-                                (ForStValueState<?, ?, ?>) stateRequest.getState();
-                        dbPutRequests.add(forStValueState.buildDBPutRequest(stateRequest));
+                    if (stateRequest.getState() instanceof ForStMapState) {
+                        ForStMapState<?, ?, ?, ?> forStMapState =
+                                (ForStMapState<?, ?, ?, ?>) stateRequest.getState();
+                        dbPutRequests.add(forStMapState.buildDBBunchPutRequest(stateRequest));
+                        return;
+                    } else if (stateRequest.getState() instanceof ForStInnerTable) {
+                        ForStInnerTable<?, ?, ?> innerTable =
+                                (ForStInnerTable<?, ?, ?>) stateRequest.getState();
+                        dbPutRequests.add(innerTable.buildDBPutRequest(stateRequest));
                         return;
                     } else {
                         throw new UnsupportedOperationException(
@@ -88,11 +122,15 @@ public class ForStStateRequestClassifier implements StateRequestContainer {
         }
     }
 
-    public List<ForStDBGetRequest<?, ?, ?>> pollDbGetRequests() {
+    public List<ForStDBGetRequest<?, ?, ?, ?>> pollDbGetRequests() {
         return dbGetRequests;
     }
 
     public List<ForStDBPutRequest<?, ?, ?>> pollDbPutRequests() {
         return dbPutRequests;
+    }
+
+    public List<ForStDBIterRequest<?, ?, ?, ?, ?>> pollDbIterRequests() {
+        return dbIterRequests;
     }
 }
