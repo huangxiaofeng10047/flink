@@ -140,7 +140,8 @@ class PyFlinkBatchExpressionTests(PyFlinkTestCase):
         self.assertEqual('upper(a)', str(expr1.upper_case))
         self.assertEqual('lower(a)', str(expr1.lower_case))
         self.assertEqual('initCap(a)', str(expr1.init_cap))
-        self.assertEqual("like(a, 'Jo_n%')", str(expr1.like('Jo_n%')))
+        self.assertEqual("LIKE(a, 'Jo_n%')", str(expr1.like('Jo_n%')))
+        self.assertEqual("LIKE(a, 'Jo_n%', '\\')", str(expr1.like('Jo_n%', '\\')))
         self.assertEqual("similar(a, 'A+')", str(expr1.similar('A+')))
         self.assertEqual('position(a, b)', str(expr1.position(expr2)))
         self.assertEqual('lpad(a, 4, b)', str(expr1.lpad(4, expr2)))
@@ -172,6 +173,8 @@ class PyFlinkBatchExpressionTests(PyFlinkTestCase):
         self.assertEqual("ELT(1, a)", str(lit(1).elt(expr1)))
         self.assertEqual('ELT(3, a, b, c)', str(lit(3).elt(expr1, expr2, expr3)))
         self.assertEqual("PRINTF('%d %s', a, b)", str(lit("%d %s").printf(expr1, expr2)))
+        self.assertEqual("STARTSWITH(a, b)", str(expr1.starts_with(expr2)))
+        self.assertEqual("ENDSWITH(a, b)", str(expr1.ends_with(expr2)))
 
         # regexp functions
         self.assertEqual("regexp(a, b)", str(expr1.regexp(expr2)))

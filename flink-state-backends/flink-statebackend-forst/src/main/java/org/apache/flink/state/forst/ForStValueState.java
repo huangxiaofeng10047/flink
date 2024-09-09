@@ -117,11 +117,11 @@ public class ForStValueState<K, N, V> extends InternalValueState<K, N, V>
 
     @SuppressWarnings("unchecked")
     @Override
-    public ForStDBGetRequest<K, N, V> buildDBGetRequest(StateRequest<?, ?, ?> stateRequest) {
+    public ForStDBGetRequest<K, N, V, V> buildDBGetRequest(StateRequest<?, ?, ?> stateRequest) {
         Preconditions.checkArgument(stateRequest.getRequestType() == StateRequestType.VALUE_GET);
         ContextKey<K, N> contextKey =
                 new ContextKey<>((RecordContext<K>) stateRequest.getRecordContext());
-        return ForStDBGetRequest.of(
+        return new ForStDBSingleGetRequest<>(
                 contextKey, this, (InternalStateFuture<V>) stateRequest.getFuture());
     }
 

@@ -886,13 +886,18 @@ public final class BuiltInFunctionDefinitions {
 
     public static final BuiltInFunctionDefinition LIKE =
             BuiltInFunctionDefinition.newBuilder()
-                    .name("like")
-                    .callSyntax("LIKE", SqlCallSyntax.BINARY_OP)
+                    .name("LIKE")
+                    .callSyntax("LIKE", SqlCallSyntax.LIKE)
                     .kind(SCALAR)
                     .inputTypeStrategy(
-                            sequence(
-                                    logical(LogicalTypeFamily.CHARACTER_STRING),
-                                    logical(LogicalTypeFamily.CHARACTER_STRING)))
+                            or(
+                                    sequence(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING)),
+                                    sequence(
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING),
+                                            logical(LogicalTypeFamily.CHARACTER_STRING))))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
                     .build();
 
@@ -924,6 +929,48 @@ public final class BuiltInFunctionDefinitions {
                                     logical(LogicalTypeFamily.CHARACTER_STRING),
                                     logical(LogicalTypeFamily.CHARACTER_STRING)))
                     .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .build();
+
+    public static final BuiltInFunctionDefinition STARTS_WITH =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("STARTSWITH")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            or(
+                                    sequence(
+                                            Arrays.asList("expr", "startExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING))),
+                                    sequence(
+                                            Arrays.asList("expr", "startExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.BINARY_STRING),
+                                                    logical(LogicalTypeFamily.BINARY_STRING)))))
+                    .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.StartsWithFunction")
+                    .build();
+
+    public static final BuiltInFunctionDefinition ENDS_WITH =
+            BuiltInFunctionDefinition.newBuilder()
+                    .name("ENDSWITH")
+                    .kind(SCALAR)
+                    .inputTypeStrategy(
+                            or(
+                                    sequence(
+                                            Arrays.asList("expr", "endExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING),
+                                                    logical(LogicalTypeFamily.CHARACTER_STRING))),
+                                    sequence(
+                                            Arrays.asList("expr", "endExpr"),
+                                            Arrays.asList(
+                                                    logical(LogicalTypeFamily.BINARY_STRING),
+                                                    logical(LogicalTypeFamily.BINARY_STRING)))))
+                    .outputTypeStrategy(nullableIfArgs(explicit(DataTypes.BOOLEAN())))
+                    .runtimeClass(
+                            "org.apache.flink.table.runtime.functions.scalar.EndsWithFunction")
                     .build();
 
     public static final BuiltInFunctionDefinition SUBSTRING =

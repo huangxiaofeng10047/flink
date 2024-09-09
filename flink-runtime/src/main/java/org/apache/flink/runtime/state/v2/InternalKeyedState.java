@@ -39,7 +39,7 @@ import org.apache.flink.runtime.asyncprocessing.StateRequestType;
 @Internal
 public abstract class InternalKeyedState<K, N, V> implements InternalPartitionedState<N> {
 
-    private final StateRequestHandler stateRequestHandler;
+    protected final StateRequestHandler stateRequestHandler;
 
     private final StateDescriptor<V> stateDescriptor;
 
@@ -90,5 +90,9 @@ public abstract class InternalKeyedState<K, N, V> implements InternalPartitioned
     /** Return related value serializer. */
     public TypeSerializer<V> getValueSerializer() {
         return stateDescriptor.getSerializer();
+    }
+
+    public StateRequestHandler getStateRequestHandler() {
+        return stateRequestHandler;
     }
 }

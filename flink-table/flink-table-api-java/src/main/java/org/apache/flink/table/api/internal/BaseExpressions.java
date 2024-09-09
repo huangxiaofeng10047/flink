@@ -93,6 +93,7 @@ import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.DISTIN
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.DIVIDE;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.ELT;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.ENCODE;
+import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.ENDS_WITH;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.EQUALS;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.EXP;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.EXTRACT;
@@ -187,6 +188,7 @@ import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.SINH;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.SPLIT;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.SPLIT_INDEX;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.SQRT;
+import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.STARTS_WITH;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.STDDEV_POP;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.STDDEV_SAMP;
 import static org.apache.flink.table.functions.BuiltInFunctionDefinitions.STR_TO_MAP;
@@ -851,6 +853,32 @@ public abstract class BaseExpressions<InType, OutType> {
     // String operations
 
     /**
+     * Returns whether {@code expr} starts with {@code startExpr}. If {@code startExpr} is empty,
+     * the result is true. <br>
+     * {@code expr} and {@code startExpr} should have same type.
+     *
+     * @param startExpr A STRING or BINARY expression.
+     * @return A BOOLEAN.
+     */
+    public OutType startsWith(InType startExpr) {
+        return toApiSpecificExpression(
+                unresolvedCall(STARTS_WITH, toExpr(), objectToExpression(startExpr)));
+    }
+
+    /**
+     * Returns whether {@code expr} ends with {@code endExpr}. If {@code endExpr} is empty, the
+     * result is true. <br>
+     * {@code expr} and {@code endExpr} should have same type.
+     *
+     * @param endExpr A STRING or BINARY expression.
+     * @return A BOOLEAN.
+     */
+    public OutType endsWith(InType endExpr) {
+        return toApiSpecificExpression(
+                unresolvedCall(ENDS_WITH, toExpr(), objectToExpression(endExpr)));
+    }
+
+    /**
      * Creates a substring of the given string at given index for a given length.
      *
      * @param beginIndex first character of the substring (starting at 1, inclusive)
@@ -1035,12 +1063,25 @@ public abstract class BaseExpressions<InType, OutType> {
     }
 
     /**
-     * Returns true, if a string matches the specified LIKE pattern.
+     * Returns true, if a string matches the specified LIKE pattern with default escape character
+     * '/'.
      *
      * <p>e.g. "Jo_n%" matches all strings that start with "Jo(arbitrary letter)n"
      */
     public OutType like(InType pattern) {
         return toApiSpecificExpression(unresolvedCall(LIKE, toExpr(), objectToExpression(pattern)));
+    }
+
+    /**
+     * Returns true, if a string matches the specified LIKE pattern with specified escape character
+     * consisting of a single char.
+     *
+     * <p>e.g. "Jo_n%" matches all strings that start with "Jo(arbitrary letter)n"
+     */
+    public OutType like(InType pattern, InType escape) {
+        return toApiSpecificExpression(
+                unresolvedCall(
+                        LIKE, toExpr(), objectToExpression(pattern), objectToExpression(escape)));
     }
 
     /**

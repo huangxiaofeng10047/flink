@@ -22,6 +22,7 @@ import org.apache.flink.api.common.state.v2.State;
 import org.apache.flink.api.common.state.v2.StateFuture;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
@@ -35,6 +36,8 @@ import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.v2.InternalPartitionedState;
+import org.apache.flink.runtime.state.v2.ListStateDescriptor;
+import org.apache.flink.runtime.state.v2.MapStateDescriptor;
 import org.apache.flink.runtime.state.v2.ValueStateDescriptor;
 import org.apache.flink.util.function.BiFunctionWithException;
 import org.apache.flink.util.function.FunctionWithException;
@@ -60,9 +63,12 @@ public class ForStDBOperationTestBase {
     @TempDir private Path tmpDbDir;
     protected RocksDB db;
 
+    protected StateRequestHandler stateRequestHandler;
+
     @BeforeEach
     public void setUp() throws Exception {
         db = RocksDB.open(tmpDbDir.toAbsolutePath().toString());
+        stateRequestHandler = buildMockStateRequestHandler();
     }
 
     @AfterEach
@@ -76,7 +82,10 @@ public class ForStDBOperationTestBase {
             throws Exception {
         byte[] nameBytes = columnFamilyName.getBytes(ConfigConstants.DEFAULT_CHARSET);
         ColumnFamilyDescriptor columnFamilyDescriptor =
-                new ColumnFamilyDescriptor(nameBytes, new ColumnFamilyOptions());
+                new ColumnFamilyDescriptor(
+                        nameBytes,
+                        ForStOperationUtils.createColumnFamilyOptions(
+                                (e) -> new ColumnFamilyOptions(), columnFamilyName));
         return db.createColumnFamily(columnFamilyDescriptor);
     }
 
@@ -123,6 +132,27 @@ public class ForStDBOperationTestBase {
         Supplier<DataInputDeserializer> valueDeserializerView =
                 () -> new DataInputDeserializer(new byte[128]);
         return new ForStValueState<>(
+                stateRequestHandler,
+                cf,
+                valueStateDescriptor,
+                serializedKeyBuilder,
+                VoidNamespace.INSTANCE,
+                () -> VoidNamespaceSerializer.INSTANCE,
+                valueSerializerView,
+                valueDeserializerView);
+    }
+
+    protected ForStListState<Integer, VoidNamespace, String> buildForStListState(String stateName)
+            throws Exception {
+        ColumnFamilyHandle cf = createColumnFamilyHandle(stateName);
+        ListStateDescriptor<String> valueStateDescriptor =
+                new ListStateDescriptor<>(stateName, BasicTypeInfo.STRING_TYPE_INFO);
+        Supplier<SerializedCompositeKeyBuilder<Integer>> serializedKeyBuilder =
+                () -> new SerializedCompositeKeyBuilder<>(IntSerializer.INSTANCE, 2, 32);
+        Supplier<DataOutputSerializer> valueSerializerView = () -> new DataOutputSerializer(32);
+        Supplier<DataInputDeserializer> valueDeserializerView =
+                () -> new DataInputDeserializer(new byte[128]);
+        return new ForStListState<>(
                 buildMockStateRequestHandler(),
                 cf,
                 valueStateDescriptor,
@@ -131,6 +161,32 @@ public class ForStDBOperationTestBase {
                 () -> VoidNamespaceSerializer.INSTANCE,
                 valueSerializerView,
                 valueDeserializerView);
+    }
+
+    protected ForStMapState<Integer, VoidNamespace, String, String> buildForStMapState(
+            String stateName) throws Exception {
+        ColumnFamilyHandle cf = createColumnFamilyHandle(stateName);
+        MapStateDescriptor<String, String> mapStateDescriptor =
+                new MapStateDescriptor<>(
+                        stateName, BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.STRING_TYPE_INFO);
+        Supplier<SerializedCompositeKeyBuilder<Integer>> serializedKeyBuilder =
+                () -> new SerializedCompositeKeyBuilder<>(IntSerializer.INSTANCE, 2, 32);
+        Supplier<DataOutputSerializer> valueSerializerView = () -> new DataOutputSerializer(32);
+        Supplier<DataInputDeserializer> keyDeserializerView =
+                () -> new DataInputDeserializer(new byte[128]);
+        Supplier<DataInputDeserializer> valueDeserializerView =
+                () -> new DataInputDeserializer(new byte[128]);
+        return new ForStMapState<>(
+                stateRequestHandler,
+                cf,
+                mapStateDescriptor,
+                serializedKeyBuilder,
+                VoidNamespace.INSTANCE,
+                () -> VoidNamespaceSerializer.INSTANCE,
+                valueSerializerView,
+                keyDeserializerView,
+                valueDeserializerView,
+                1);
     }
 
     static class TestStateFuture<T> implements InternalStateFuture<T> {
@@ -196,6 +252,54 @@ public class ForStDBOperationTestBase {
                 StateFuture<? extends U> other,
                 BiFunctionWithException<? super T, ? super U, ? extends V, ? extends Exception>
                         fn) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <U, V> StateFuture<Tuple2<Boolean, Object>> thenConditionallyApply(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                FunctionWithException<? super T, ? extends U, ? extends Exception> actionIfTrue,
+                FunctionWithException<? super T, ? extends V, ? extends Exception> actionIfFalse) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <U> StateFuture<Tuple2<Boolean, U>> thenConditionallyApply(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                FunctionWithException<? super T, ? extends U, ? extends Exception> actionIfTrue) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public StateFuture<Boolean> thenConditionallyAccept(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                ThrowingConsumer<? super T, ? extends Exception> actionIfTrue,
+                ThrowingConsumer<? super T, ? extends Exception> actionIfFalse) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public StateFuture<Boolean> thenConditionallyAccept(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                ThrowingConsumer<? super T, ? extends Exception> actionIfTrue) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <U, V> StateFuture<Tuple2<Boolean, Object>> thenConditionallyCompose(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                FunctionWithException<? super T, ? extends StateFuture<U>, ? extends Exception>
+                        actionIfTrue,
+                FunctionWithException<? super T, ? extends StateFuture<V>, ? extends Exception>
+                        actionIfFalse) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <U> StateFuture<Tuple2<Boolean, U>> thenConditionallyCompose(
+                FunctionWithException<? super T, Boolean, ? extends Exception> condition,
+                FunctionWithException<? super T, ? extends StateFuture<U>, ? extends Exception>
+                        actionIfTrue) {
             throw new UnsupportedOperationException();
         }
     }

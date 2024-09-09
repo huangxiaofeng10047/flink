@@ -69,14 +69,14 @@ comparison:
       `12 NOT BETWEEN 15 AND NULL` 返回 `TRUE`；
       `12 NOT BETWEEN SYMMETRIC 12 AND NULL` 返回 `UNKNOWN`。
   - sql: string1 LIKE string2 [ ESCAPE char ]
-    table: string1.like(string2)
+    table: string1.like(string2[, char])
     description: |
       如果 string1 匹配 string2 返回 `TRUE`；如果 string1 或 string2 为 `NULL` 返回 `UNKNOWN`。
-      如果需要可以定义转义字符。尚不支持转义字符。
+      如果需要可以定义包含单个字符的转义字符，默认为 '\'。
   - sql: string1 NOT LIKE string2 [ ESCAPE char ]
     description: |
       如果 string1 与 string2 不匹配返回 `TRUE`；如果 string1 或 string2 为 `NULL` 返回 `UNKNOWN`。
-      如果需要可以定义转义字符。尚不支持转义字符。
+      如果需要可以定义包含单个字符的转义字符，默认为 '\'。
   - sql: string1 SIMILAR TO string2 [ ESCAPE char ]
     table: string1.similar(string2)
     description: |
@@ -398,6 +398,30 @@ string:
       将字符串 STRING1 从位置 INT1 开始替换 INT2（默认为 STRING2 的长度）个来自字符串 STRING2 的字符并返回。
       例如 `'xxxxxtest'.overlay('xxxx', 6)` 返回 `"xxxxxxxxx"`；
       `'xxxxxtest'.overlay('xxxx', 6, 2)` 返回 `"xxxxxxxxxst"`。
+  - sql: STARTSWITH(expr, startExpr)
+    table: expr.startsWith(startExpr)
+    description: |
+      判断 expr 是否以 startExpr 开头。如果 startExpr 为空，则结果为 true。
+      
+      expr 和 startExpr 应具有相同的类型。
+      
+      `expr <CHAR | VARCHAR>, startExpr <CHAR | VARCHAR>`
+      
+      `expr <BINARY | VARBINARY>, startExpr <BINARY | VARBINARY>`
+      
+      返回一个 `BOOLEAN`。如果任意参数为 `NULL`，则返回 `NULL`。
+  - sql: ENDSWITH(expr, endExpr)
+    table: expr.endsWith(endExpr)
+    description: |
+      判断 expr 是否以 endExpr 结尾。如果 endExpr 为空，则结果为 true。
+      
+      expr 和 endExpr 应具有相同的类型。
+      
+      `expr <CHAR | VARCHAR>, endExpr <CHAR | VARCHAR>`
+      
+      `expr <BINARY | VARBINARY>, endExpr <BINARY | VARBINARY>`
+      
+      返回一个 `BOOLEAN`。如果任意参数为 `NULL`，则返回 `NULL`。
   - sql: SUBSTRING(string FROM integer1 [ FOR integer2 ])
     table: |
       STRING.substring(INT1)

@@ -1028,6 +1028,26 @@ class Expression(Generic[T]):
 
     # ---------------------------- string functions ----------------------------------
 
+    def starts_with(self, start_expr) -> 'Expression':
+        """
+        Returns whether expr starts with start_expr. If start_expr is empty, the result is true.
+        expr and start_expr should have same type.
+
+        :param start_expr: A STRING or BINARY expression.
+        :return: A BOOLEAN.
+        """
+        return _binary_op("startsWith")(self, start_expr)
+
+    def ends_with(self, end_expr) -> 'Expression':
+        """
+        Returns whether expr ends with end_expr. If end_expr is empty, the result is true.
+        expr and end_expr should have same type.
+
+        :param end_expr: A STRING or BINARY expression.
+        :return: A BOOLEAN.
+        """
+        return _binary_op("endsWith")(self, end_expr)
+
     def substring(self,
                   begin_index: Union[int, 'Expression[int]'],
                   length: Union[int, 'Expression[int]'] = None) -> 'Expression[str]':
@@ -1135,12 +1155,19 @@ class Expression(Generic[T]):
         """
         return _unary_op("initCap")(self)
 
-    def like(self, pattern: Union[str, 'Expression[str]'] = None) -> 'Expression[bool]':
+    def like(self,
+             pattern: Union[str, 'Expression[str]'] = None,
+             escape=None) -> 'Expression[bool]':
         """
-        Returns true, if a string matches the specified LIKE pattern.
-        e.g. 'Jo_n%' matches all strings that start with 'Jo(arbitrary letter)n'
+        Returns true, if a string matches the specified LIKE pattern
+        e.g. 'Jo_n%' matches all strings that start with 'Jo(arbitrary letter)n'.
+        An escape character consisting of a single char can be defined if necessary,
+        '\\' by default.
         """
-        return _binary_op("like")(self, pattern)
+        if escape is None:
+            return _binary_op("like")(self, pattern)
+        else:
+            return _ternary_op("like")(self, pattern, escape)
 
     def similar(self, pattern: Union[str, 'Expression[str]'] = None) -> 'Expression[bool]':
         """
