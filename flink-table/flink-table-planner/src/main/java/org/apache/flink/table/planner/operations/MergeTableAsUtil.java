@@ -26,6 +26,7 @@ import org.apache.flink.sql.parser.ddl.SqlWatermark;
 import org.apache.flink.sql.parser.ddl.constraint.SqlTableConstraint;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.Schema.UnresolvedColumn;
+import org.apache.flink.table.api.Schema.UnresolvedMetadataColumn;
 import org.apache.flink.table.api.Schema.UnresolvedPhysicalColumn;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
@@ -42,10 +43,10 @@ import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.sql.SqlCall;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.validate.SqlValidator;
 
@@ -136,18 +137,16 @@ public class MergeTableAsUtil {
             }
         }
 
-        // if there are no new sink fields to include, then return the original query
-        if (assignedFields.isEmpty()) {
-            return origQueryOperation;
-        }
-
         // rewrite query
         SqlCall newSelect =
-                rewriterUtils.rewriteSelect(
-                        (SqlSelect) origQueryNode,
+                rewriterUtils.rewriteCall(
+                        rewriterUtils,
+                        sqlValidator,
+                        (SqlCall) origQueryNode,
                         typeFactory.buildRelNodeRowType(sinkRowType),
                         assignedFields,
-                        targetPositions);
+                        targetPositions,
+                        () -> "Unsupported node type " + origQueryNode.getKind());
 
         return (PlannerQueryOperation)
                 SqlNodeToOperationConversion.convert(flinkPlanner, catalogManager, newSelect)
@@ -208,6 +207,22 @@ public class MergeTableAsUtil {
         if (primaryKey.isPresent()) {
             schemaBuilder.setPrimaryKey(primaryKey.get());
         }
+
+        return schemaBuilder.build();
+    }
+
+    /** Reorders the columns from the source schema based on the columns identifiers list. */
+    public Schema reorderSchema(SqlNodeList sqlColumnList, ResolvedSchema sourceSchema) {
+        SchemaBuilder schemaBuilder =
+                new SchemaBuilder(
+                        (FlinkTypeFactory) validator.getTypeFactory(),
+                        dataTypeFactory,
+                        validator,
+                        escapeExpression);
+
+        schemaBuilder.reorderColumns(
+                sqlColumnList,
+                Schema.newBuilder().fromResolvedSchema(sourceSchema).build().getColumns());
 
         return schemaBuilder.build();
     }
@@ -311,6 +326,33 @@ public class MergeTableAsUtil {
             columns.putAll(sourceSchemaCols);
         }
 
+        /** Reorders the columns from the source schema based on the columns identifiers list. */
+        private void reorderColumns(List<SqlNode> identifiers, List<UnresolvedColumn> sourceCols) {
+            Map<String, UnresolvedColumn> sinkSchemaCols = new LinkedHashMap<>();
+            Map<String, UnresolvedColumn> sourceSchemaCols = new LinkedHashMap<>();
+
+            populateColumnsFromSource(sourceCols, sourceSchemaCols);
+
+            if (identifiers.size() != sourceCols.size()) {
+                throw new ValidationException(
+                        "The number of columns in the column list must match the number "
+                                + "of columns in the source schema.");
+            }
+
+            for (SqlNode identifier : identifiers) {
+                String name = ((SqlIdentifier) identifier).getSimple();
+                if (!sourceSchemaCols.containsKey(name)) {
+                    throw new ValidationException(
+                            String.format("Column '%s' not found in the source schema. ", name));
+                }
+
+                sinkSchemaCols.put(name, sourceSchemaCols.get(name));
+            }
+
+            columns.clear();
+            columns.putAll(sinkSchemaCols);
+        }
+
         /**
          * Populates the schema columns from the source schema. The source schema is expected to
          * contain only physical columns.
@@ -345,19 +387,31 @@ public class MergeTableAsUtil {
                 int columnPos,
                 UnresolvedColumn sourceColumn,
                 UnresolvedColumn sinkColumn) {
-            if (!(sinkColumn instanceof UnresolvedPhysicalColumn)) {
+            LogicalType sinkColumnType;
+
+            if (sinkColumn instanceof UnresolvedPhysicalColumn) {
+                sinkColumnType = getLogicalType(((UnresolvedPhysicalColumn) sinkColumn));
+            } else if ((sinkColumn instanceof UnresolvedMetadataColumn)) {
+                if (((UnresolvedMetadataColumn) sinkColumn).isVirtual()) {
+                    throw new ValidationException(
+                            String.format(
+                                    "A column named '%s' already exists in the source schema. "
+                                            + "Virtual metadata columns cannot overwrite "
+                                            + "columns from source.",
+                                    columnName));
+                }
+
+                sinkColumnType = getLogicalType(((UnresolvedMetadataColumn) sinkColumn));
+            } else {
                 throw new ValidationException(
                         String.format(
                                 "A column named '%s' already exists in the source schema. "
-                                        + "Computed and metadata columns cannot overwrite "
-                                        + "regular columns.",
+                                        + "Computed columns cannot overwrite columns from source.",
                                 columnName));
             }
 
             LogicalType sourceColumnType =
                     getLogicalType(((UnresolvedPhysicalColumn) sourceColumn));
-            LogicalType sinkColumnType = getLogicalType(((UnresolvedPhysicalColumn) sinkColumn));
-
             if (!supportsImplicitCast(sourceColumnType, sinkColumnType)) {
                 throw new ValidationException(
                         String.format(

@@ -534,7 +534,8 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                     flinkConfiguration
                             .getOptional(PipelineOptions.JARS)
                             .orElse(Collections.emptyList());
-            Preconditions.checkArgument(pipelineJars.size() == 1, "Should only have one jar");
+            Preconditions.checkArgument(
+                    pipelineJars.size() <= 1, "Should only have at most one jar.");
         }
 
         try {
@@ -617,7 +618,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
             }
 
             final boolean fetchToken =
-                    flinkConfiguration.get(SecurityOptions.KERBEROS_FETCH_DELEGATION_TOKEN);
+                    flinkConfiguration.get(SecurityOptions.DELEGATION_TOKENS_ENABLED);
             final boolean yarnAccessFSEnabled =
                     !CollectionUtil.isNullOrEmpty(
                             flinkConfiguration.get(
@@ -626,7 +627,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                 throw new IllegalConfigurationException(
                         String.format(
                                 "When %s is disabled, %s must be disabled as well.",
-                                SecurityOptions.KERBEROS_FETCH_DELEGATION_TOKEN.key(),
+                                SecurityOptions.DELEGATION_TOKENS_ENABLED.key(),
                                 SecurityOptions.KERBEROS_HADOOP_FILESYSTEMS_TO_ACCESS.key()));
             }
         }
@@ -915,15 +916,15 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
         if (HighAvailabilityMode.isHighAvailabilityModeActivated(configuration)) {
             // activate re-execution of failed applications
             appContext.setMaxAppAttempts(
-                    configuration.getInteger(
-                            YarnConfigOptions.APPLICATION_ATTEMPTS.key(),
+                    configuration.get(
+                            YarnConfigOptions.APPLICATION_ATTEMPTS,
                             YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS));
 
             activateHighAvailabilitySupport(appContext);
         } else {
             // set number of application retries to 1 in the default case
             appContext.setMaxAppAttempts(
-                    configuration.getInteger(YarnConfigOptions.APPLICATION_ATTEMPTS.key(), 1));
+                    configuration.get(YarnConfigOptions.APPLICATION_ATTEMPTS, 1));
         }
 
         final Set<Path> userJarFiles = new HashSet<>();
@@ -1103,7 +1104,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 
             fileUploader.registerSingleLocalResource(
                     flinkConfigFileName,
-                    new Path(tmpConfigurationFile.getAbsolutePath()),
+                    new Path(tmpConfigurationFile.toURI()),
                     "",
                     LocalResourceType.FILE,
                     true,
@@ -1200,8 +1201,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
         }
 
         final JobManagerProcessSpec processSpec =
-                JobManagerProcessUtils.processSpecFromConfigWithNewOptionToInterpretLegacyHeap(
-                        flinkConfiguration, JobManagerOptions.TOTAL_PROCESS_MEMORY);
+                JobManagerProcessUtils.processSpecFromConfig(flinkConfiguration);
         final ContainerLaunchContext amContainer =
                 setupApplicationMasterContainer(yarnClusterEntrypoint, hasKrb5, processSpec);
 
@@ -1308,7 +1308,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                                     + "If log aggregation is enabled on your cluster, use this command to further investigate the issue:\n"
                                     + "yarn logs -applicationId "
                                     + appId);
-                    // break ..
+                // break ..
                 case RUNNING:
                     LOG.info("YARN application has been deployed successfully.");
                     break loop;

@@ -79,8 +79,6 @@ public final class ReporterSetup {
                             // classes
                             "([\\S&&[^.]]*)\\."
                             + '('
-                            + Pattern.quote(MetricOptions.REPORTER_CLASS.key())
-                            + '|'
                             + Pattern.quote(MetricOptions.REPORTER_FACTORY_CLASS.key())
                             + ')');
 
@@ -345,7 +343,9 @@ public final class ReporterSetup {
 
                 // massage user variables keys into scope format for parity to variable exclusion
                 Map<String, String> additionalVariables =
-                        reporterConfig.get(MetricOptions.REPORTER_ADDITIONAL_VARIABLES).entrySet()
+                        reporterConfig
+                                .get(MetricOptions.REPORTER_ADDITIONAL_VARIABLES)
+                                .entrySet()
                                 .stream()
                                 .collect(
                                         Collectors.toMap(
@@ -381,22 +381,11 @@ public final class ReporterSetup {
             final Configuration reporterConfig,
             final Map<String, MetricReporterFactory> reporterFactories) {
 
-        final String reporterClassName = reporterConfig.get(MetricOptions.REPORTER_CLASS);
         final String factoryClassName = reporterConfig.get(MetricOptions.REPORTER_FACTORY_CLASS);
 
         if (factoryClassName != null) {
             return loadViaFactory(
                     factoryClassName, reporterName, reporterConfig, reporterFactories);
-        }
-
-        if (reporterClassName != null) {
-            LOG.warn(
-                    "The reporter configuration of '{}' configures the reporter class, which is no a no longer supported approach to configure reporters."
-                            + " Please configure a factory class instead: '{}{}.{}: <factoryClass>'.",
-                    reporterName,
-                    ConfigConstants.METRICS_REPORTER_PREFIX,
-                    reporterName,
-                    MetricOptions.REPORTER_FACTORY_CLASS.key());
         }
 
         LOG.warn(

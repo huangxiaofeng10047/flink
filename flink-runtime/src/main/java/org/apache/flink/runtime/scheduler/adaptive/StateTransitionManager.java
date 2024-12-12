@@ -18,8 +18,9 @@
 
 package org.apache.flink.runtime.scheduler.adaptive;
 
+import org.apache.flink.api.common.JobID;
+
 import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.ScheduledFuture;
 
 /**
@@ -69,15 +70,12 @@ public interface StateTransitionManager {
          * @return a ScheduledFuture representing pending completion of the operation.
          */
         ScheduledFuture<?> scheduleOperation(Runnable callback, Duration delay);
-    }
-
-    /** Interface for creating {@code StateTransitionManager} instances. */
-    interface Factory {
 
         /**
-         * Creates a {@code StateTransitionManager} instance for the given {@code Context} and
-         * previous state transition time.
+         * Gets the {@link JobID} of the job.
+         *
+         * @return the {@link JobID} of the job
          */
-        StateTransitionManager create(Context context, Instant lastStateTransition);
+        JobID getJobId();
     }
 }

@@ -104,16 +104,18 @@ class SqlCreateTableConverter {
                 UnresolvedIdentifier.of(sqlCreateTableAs.fullTableName());
         ObjectIdentifier identifier = catalogManager.qualifyIdentifier(unresolvedIdentifier);
 
+        SqlNode asQuerySqlNode = sqlCreateTableAs.getAsQuery();
+        SqlNode validatedAsQuery = flinkPlanner.validate(asQuerySqlNode);
+
         PlannerQueryOperation query =
                 (PlannerQueryOperation)
                         SqlNodeToOperationConversion.convert(
-                                        flinkPlanner, catalogManager, sqlCreateTableAs.getAsQuery())
+                                        flinkPlanner, catalogManager, validatedAsQuery)
                                 .orElseThrow(
                                         () ->
                                                 new TableException(
                                                         "CTAS unsupported node type "
-                                                                + sqlCreateTableAs
-                                                                        .getAsQuery()
+                                                                + validatedAsQuery
                                                                         .getClass()
                                                                         .getSimpleName()));
         ResolvedCatalogTable tableWithResolvedSchema =
@@ -125,7 +127,7 @@ class SqlCreateTableConverter {
                         catalogManager,
                         flinkPlanner,
                         query,
-                        sqlCreateTableAs.getAsQuery(),
+                        validatedAsQuery,
                         tableWithResolvedSchema);
 
         CreateTableOperation createTableOperation =
@@ -140,7 +142,7 @@ class SqlCreateTableConverter {
     }
 
     private ResolvedCatalogTable createCatalogTable(
-            SqlCreateTableAs sqlCreateTableAs, ResolvedSchema mergeSchema) {
+            SqlCreateTableAs sqlCreateTableAs, ResolvedSchema querySchema) {
         Map<String, String> tableOptions =
                 sqlCreateTableAs.getPropertyList().getList().stream()
                         .collect(
@@ -151,12 +153,20 @@ class SqlCreateTableConverter {
         String tableComment =
                 OperationConverterUtils.getTableComment(sqlCreateTableAs.getComment());
 
-        Schema mergedSchema =
-                mergeTableAsUtil.mergeSchemas(
-                        sqlCreateTableAs.getColumnList(),
-                        sqlCreateTableAs.getWatermark().orElse(null),
-                        sqlCreateTableAs.getFullConstraints(),
-                        mergeSchema);
+        Schema mergedSchema;
+        if (sqlCreateTableAs.isSchemaWithColumnsIdentifiersOnly()) {
+            // If only column identifiers are provided, then these are used to
+            // order the columns in the schema.
+            mergedSchema =
+                    mergeTableAsUtil.reorderSchema(sqlCreateTableAs.getColumnList(), querySchema);
+        } else {
+            mergedSchema =
+                    mergeTableAsUtil.mergeSchemas(
+                            sqlCreateTableAs.getColumnList(),
+                            sqlCreateTableAs.getWatermark().orElse(null),
+                            sqlCreateTableAs.getFullConstraints(),
+                            querySchema);
+        }
 
         Optional<TableDistribution> tableDistribution =
                 Optional.ofNullable(sqlCreateTableAs.getDistribution())

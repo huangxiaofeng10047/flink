@@ -18,13 +18,15 @@
 
 package org.apache.flink.state.forst.restore;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.state.forst.ForStNativeMetricOptions;
+import org.apache.flink.state.forst.ForStOperationUtils;
 
-import org.rocksdb.ColumnFamilyOptions;
-import org.rocksdb.DBOptions;
+import org.forstdb.ColumnFamilyOptions;
+import org.forstdb.DBOptions;
 
-import java.io.File;
+import java.util.Map;
 import java.util.function.Function;
 
 /** Encapsulates the process of initiating a ForSt instance without restore. */
@@ -32,13 +34,15 @@ public class ForStNoneRestoreOperation implements ForStRestoreOperation {
     private final ForStHandle rocksHandle;
 
     public ForStNoneRestoreOperation(
-            File instanceRocksDBPath,
+            Map<String, ForStOperationUtils.ForStKvStateInfo> kvStateInformation,
+            Path instanceRocksDBPath,
             DBOptions dbOptions,
             Function<String, ColumnFamilyOptions> columnFamilyOptionsFactory,
             ForStNativeMetricOptions nativeMetricOptions,
             MetricGroup metricGroup) {
         this.rocksHandle =
                 new ForStHandle(
+                        kvStateInformation,
                         instanceRocksDBPath,
                         dbOptions,
                         columnFamilyOptionsFactory,
@@ -52,7 +56,10 @@ public class ForStNoneRestoreOperation implements ForStRestoreOperation {
         return new ForStRestoreResult(
                 this.rocksHandle.getDb(),
                 this.rocksHandle.getDefaultColumnFamilyHandle(),
-                this.rocksHandle.getNativeMetricMonitor());
+                this.rocksHandle.getNativeMetricMonitor(),
+                -1,
+                null,
+                null);
     }
 
     @Override

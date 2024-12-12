@@ -21,10 +21,12 @@ package org.apache.flink.streaming.runtime.operators.sink.committables;
 import org.apache.flink.metrics.groups.SinkCommitterMetricGroup;
 import org.apache.flink.runtime.metrics.groups.MetricsGroupTestUtils;
 import org.apache.flink.streaming.api.connector.sink2.CommittableSummary;
-import org.apache.flink.streaming.api.connector.sink2.SinkV2Assertions;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
+import static org.apache.flink.streaming.api.connector.sink2.CommittableMessage.EOI;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CommittableCollectorTest {
@@ -34,29 +36,30 @@ class CommittableCollectorTest {
     @Test
     void testGetCheckpointCommittablesUpTo() {
         final CommittableCollector<Integer> committableCollector =
-                new CommittableCollector<>(1, 1, METRIC_GROUP);
-        CommittableSummary<Integer> first = new CommittableSummary<>(1, 1, 1L, 1, 0, 0);
+                new CommittableCollector<>(METRIC_GROUP);
+        CommittableSummary<Integer> first = new CommittableSummary<>(1, 1, 1L, 1, 0);
         committableCollector.addMessage(first);
-        CommittableSummary<Integer> second = new CommittableSummary<>(1, 1, 2L, 1, 0, 0);
+        CommittableSummary<Integer> second = new CommittableSummary<>(1, 1, 2L, 1, 0);
         committableCollector.addMessage(second);
-        committableCollector.addMessage(new CommittableSummary<>(1, 1, 3L, 1, 0, 0));
+        committableCollector.addMessage(new CommittableSummary<>(1, 1, 3L, 1, 0));
 
         assertThat(committableCollector.getCheckpointCommittablesUpTo(2)).hasSize(2);
 
-        assertThat(committableCollector.getEndOfInputCommittable()).isNull();
+        assertThat(committableCollector.getEndOfInputCommittable()).isNotPresent();
     }
 
     @Test
     void testGetEndOfInputCommittable() {
         final CommittableCollector<Integer> committableCollector =
-                new CommittableCollector<>(1, 1, METRIC_GROUP);
-        CommittableSummary<Integer> first = new CommittableSummary<>(1, 1, null, 1, 0, 0);
+                new CommittableCollector<>(METRIC_GROUP);
+        CommittableSummary<Integer> first = new CommittableSummary<>(1, 1, EOI, 1, 0);
         committableCollector.addMessage(first);
 
-        CommittableManager<Integer> endOfInputCommittable =
+        Optional<CheckpointCommittableManager<Integer>> endOfInputCommittable =
                 committableCollector.getEndOfInputCommittable();
-        assertThat(endOfInputCommittable).isNotNull();
-        SinkV2Assertions.assertThat(endOfInputCommittable.getSummary())
-                .hasCheckpointId(Long.MAX_VALUE);
+        assertThat(endOfInputCommittable).isPresent();
+        assertThat(endOfInputCommittable)
+                .get()
+                .returns(EOI, CheckpointCommittableManager::getCheckpointId);
     }
 }

@@ -20,7 +20,6 @@ package org.apache.flink.fs.s3.common;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.EntropyInjectingFileSystem;
-import org.apache.flink.core.fs.FileSystemKind;
 import org.apache.flink.core.fs.ICloseableRegistry;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.PathsCopyingFileSystem;
@@ -148,7 +147,7 @@ public class FlinkS3FileSystem extends HadoopFileSystem
                             s ->
                                     new S5CmdConfiguration(
                                             s,
-                                            flinkConfig.getString(S5CMD_EXTRA_ARGS),
+                                            flinkConfig.get(S5CMD_EXTRA_ARGS),
                                             flinkConfig.get(ACCESS_KEY),
                                             flinkConfig.get(SECRET_KEY),
                                             flinkConfig.get(ENDPOINT),
@@ -286,7 +285,8 @@ public class FlinkS3FileSystem extends HadoopFileSystem
                     || runningSizeFiles >= s5CmdConfiguration.maxBatchSizeFiles
                     || i == requests.size() - 1) {
                 LOG.info(
-                        "Copy {} files using s5cmd, total size: {}, args: {}",
+                        "Copy {} files out of {} using s5cmd, total size: {}, args: {}",
+                        batch.size(),
                         requests.size(),
                         runningSizeBytes,
                         artefacts);
@@ -447,11 +447,6 @@ public class FlinkS3FileSystem extends HadoopFileSystem
     public String generateEntropy() {
         return StringUtils.generateRandomAlphanumericString(
                 ThreadLocalRandom.current(), entropyLength);
-    }
-
-    @Override
-    public FileSystemKind getKind() {
-        return FileSystemKind.OBJECT_STORE;
     }
 
     public String getLocalTmpDir() {

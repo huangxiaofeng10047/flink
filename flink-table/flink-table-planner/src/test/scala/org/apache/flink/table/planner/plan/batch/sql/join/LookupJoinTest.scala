@@ -17,9 +17,9 @@
  */
 package org.apache.flink.table.planner.plan.batch.sql.join
 
-import org.apache.flink.api.scala._
 import org.apache.flink.table.api._
 import org.apache.flink.table.api.config.OptimizerConfigOptions
+import org.apache.flink.table.legacy.sources.LookupableTableSource
 import org.apache.flink.table.planner.plan.optimize.program.FlinkBatchProgram
 import org.apache.flink.table.planner.plan.stream.sql.join.TestTemporalTable
 import org.apache.flink.table.planner.runtime.utils.JavaUserDefinedScalarFunctions.PythonScalarFunction
@@ -36,7 +36,7 @@ import org.junit.jupiter.api.{BeforeEach, TestTemplate}
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * The physical plans for legacy [[org.apache.flink.table.sources.LookupableTableSource]] and new
+ * The physical plans for legacy [[LookupableTableSource]] and new
  * [[org.apache.flink.table.connector.source.LookupTableSource]] should be identical.
  */
 @ExtendWith(Array(classOf[ParameterizedTestExtension]))
@@ -73,6 +73,46 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase {
                           |) WITH (
                           |  'connector' = 'values',
                           |  'bounded' = 'true'
+                          |)
+                          |""".stripMargin)
+      testUtil.addTable("""
+                          |CREATE TABLE LookupTableWithCustomShuffle1 (
+                          |  `id` INT,
+                          |  `name` STRING,
+                          |  `age` INT,
+                          |  PRIMARY KEY(id) NOT ENFORCED
+                          |) WITH (
+                          |  'connector' = 'values',
+                          |  'enable-custom-shuffle' = 'true',
+                          |  'bounded' = 'true'
+                          |)
+                          |""".stripMargin)
+      testUtil.addTable("""
+                          |CREATE TABLE LookupTableWithCustomShuffle2 (
+                          |  `id` INT,
+                          |  `name` STRING,
+                          |  `age` INT,
+                          |  PRIMARY KEY(id) NOT ENFORCED
+                          |) WITH (
+                          |  'connector' = 'values',
+                          |  'enable-custom-shuffle' = 'true',
+                          |  'bounded' = 'true',
+                          |  'custom-shuffle-deterministic' = 'false'
+                          |)
+                          |""".stripMargin)
+
+      testUtil.addTable("""
+                          |CREATE TABLE LookupTableWithCustomShuffle3 (
+                          |  `id` INT,
+                          |  `name` STRING,
+                          |  `age` INT,
+                          |  PRIMARY KEY(id) NOT ENFORCED
+                          |) WITH (
+                          |  'connector' = 'values',
+                          |  'enable-custom-shuffle' = 'true',
+                          |  'bounded' = 'true',
+                          |  'custom-shuffle-empty-partitioner' = 'true'
+                          |
                           |)
                           |""".stripMargin)
     }
@@ -349,6 +389,43 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase {
       """.stripMargin
 
     testUtil.verifyExecPlan(sql)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithShuffleLookupHint(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle1 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    testUtil.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithNotShuffleLookupHint(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='false') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle1 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    testUtil.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithShuffleLookupHintEmptyPartitioner(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle3 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    testUtil.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithNonDeterministicCustomShuffle(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle2 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    // custom partitioner will be used as this is insert-only input.
+    testUtil.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
   }
 
   // ==========================================================================================

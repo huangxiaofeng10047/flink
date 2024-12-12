@@ -33,8 +33,11 @@ import org.apache.flink.table.catalog.listener.CatalogModificationListener;
 import org.apache.flink.table.catalog.listener.CatalogModificationListenerFactory;
 import org.apache.flink.table.descriptors.ConnectorDescriptorValidator;
 import org.apache.flink.table.descriptors.DescriptorProperties;
-import org.apache.flink.table.sinks.TableSink;
-import org.apache.flink.table.sources.TableSource;
+import org.apache.flink.table.legacy.factories.TableFactory;
+import org.apache.flink.table.legacy.factories.TableSinkFactory;
+import org.apache.flink.table.legacy.factories.TableSourceFactory;
+import org.apache.flink.table.legacy.sinks.TableSink;
+import org.apache.flink.table.legacy.sources.TableSource;
 
 import javax.annotation.Nullable;
 
@@ -180,8 +183,10 @@ public class TableFactoryUtil {
     /** Find and create modification listener list from configuration. */
     public static List<CatalogModificationListener> findCatalogModificationListenerList(
             final ReadableConfig configuration, final ClassLoader classLoader) {
-        return configuration.getOptional(TableConfigOptions.TABLE_CATALOG_MODIFICATION_LISTENERS)
-                .orElse(Collections.emptyList()).stream()
+        return configuration
+                .getOptional(TableConfigOptions.TABLE_CATALOG_MODIFICATION_LISTENERS)
+                .orElse(Collections.emptyList())
+                .stream()
                 .map(
                         identifier ->
                                 FactoryUtil.discoverFactory(

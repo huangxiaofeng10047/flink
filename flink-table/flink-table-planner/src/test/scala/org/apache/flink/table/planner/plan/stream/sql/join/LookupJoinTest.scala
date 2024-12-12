@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.planner.plan.stream.sql.join
 
-import org.apache.flink.api.scala._
+import org.apache.flink.legacy.table.sources.StreamTableSource
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.api._
@@ -26,12 +26,13 @@ import org.apache.flink.table.api.internal.TableEnvironmentInternal
 import org.apache.flink.table.data.RowData
 import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.CONNECTOR_TYPE
 import org.apache.flink.table.descriptors.DescriptorProperties
-import org.apache.flink.table.factories.TableSourceFactory
 import org.apache.flink.table.functions.{AsyncTableFunction, TableFunction, UserDefinedFunction}
+import org.apache.flink.table.legacy.api.TableSchema
+import org.apache.flink.table.legacy.factories.TableSourceFactory
+import org.apache.flink.table.legacy.sources.{LookupableTableSource, TableSource}
 import org.apache.flink.table.planner.plan.utils._
 import org.apache.flink.table.planner.utils.{TableTestBase, TestingTableEnvironment}
 import org.apache.flink.table.planner.utils.TableTestUtil.{readFromResource, replaceNodeIdInOperator, replaceStageId, replaceStreamNodeId}
-import org.apache.flink.table.sources._
 import org.apache.flink.table.types.DataType
 import org.apache.flink.table.utils.EncodingUtils
 import org.apache.flink.testutils.junit.extensions.parameterized.{ParameterizedTestExtension, Parameters}
@@ -47,7 +48,7 @@ import org.junit.jupiter.api.{BeforeEach, TestTemplate}
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * The physical plans for legacy [[org.apache.flink.table.sources.LookupableTableSource]] and new
+ * The physical plans for legacy [[LookupableTableSource]] and new
  * [[org.apache.flink.table.connector.source.LookupTableSource]] should be identical.
  */
 @ExtendWith(Array(classOf[ParameterizedTestExtension]))
@@ -103,6 +104,52 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase with Seri
                       |)
                       |""".stripMargin)
     }
+    util.addTable("""
+                    |CREATE TABLE LookupTableWithCustomShuffle1 (
+                    |  `id` INT,
+                    |  `name` STRING,
+                    |  `age` INT,
+                    |  PRIMARY KEY(id) NOT ENFORCED
+                    |) WITH (
+                    |  'connector' = 'values',
+                    |  'enable-custom-shuffle' = 'true'
+                    |)
+                    |""".stripMargin)
+
+    util.addTable("""
+                    |CREATE TABLE LookupTableWithCustomShuffle2 (
+                    |  `id` INT,
+                    |  `name` STRING,
+                    |  `age` INT,
+                    |  PRIMARY KEY(id) NOT ENFORCED
+                    |) WITH (
+                    |  'connector' = 'values',
+                    |  'enable-custom-shuffle' = 'true',
+                    |  'custom-shuffle-deterministic' = 'false'
+                    |)
+                    |""".stripMargin)
+    util.addTable("""
+                    |CREATE TABLE LookupTableWithCustomShuffle3 (
+                    |  `id` INT,
+                    |  `name` STRING,
+                    |  `age` INT,
+                    |  PRIMARY KEY(id) NOT ENFORCED
+                    |) WITH (
+                    |  'connector' = 'values',
+                    |  'enable-custom-shuffle' = 'true',
+                    |  'custom-shuffle-empty-partitioner' = 'true'
+                    |)
+                    |""".stripMargin)
+    util.addTable("""
+                    |CREATE TABLE UpsertSource (
+                    |  `a` int,
+                    |  `b` varchar,
+                    |  `c` bigint,
+                    |  `proctime` AS PROCTIME()
+                    |) with (
+                    |  'connector' = 'values',
+                    |  'changelog-mode' = 'I,UA,UB,D'
+                    |)""".stripMargin)
     util.addTable("""
                     |CREATE TABLE Sink1 (
                     |  a int,
@@ -960,6 +1007,51 @@ class LookupJoinTest(legacyTableSource: Boolean) extends TableTestBase with Seri
         |ON T1.a=D.id
         |""".stripMargin
     )
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithShuffleLookupHint(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle1 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    util.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithNotShuffleLookupHint(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='false') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle1 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    util.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithShuffleLookupHintEmptyPartitioner(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle3 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    util.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithNonDeterministicInsertOnlyInputCustomShuffle(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM MyTable AS T JOIN LookupTableWithCustomShuffle2 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    util.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
+  }
+
+  @TestTemplate
+  def testJoinTemporalTableWithNonDeterministicUpsertInputCustomShuffle(): Unit = {
+    assumeThat(legacyTableSource).isFalse
+    val sql =
+      "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ * FROM UpsertSource AS T JOIN LookupTableWithCustomShuffle2 " +
+        "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.a = D.id"
+    util.verifyExplain(sql, ExplainDetail.JSON_EXECUTION_PLAN)
   }
 
   // ==========================================================================================

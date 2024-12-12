@@ -24,7 +24,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.CloseableRegistry;
@@ -44,21 +43,21 @@ import org.apache.flink.testutils.junit.FailsInGHAContainerWithRootUser;
 import org.apache.flink.util.FileUtils;
 
 import org.apache.commons.lang3.RandomUtils;
+import org.forstdb.BlockBasedTableConfig;
+import org.forstdb.BloomFilter;
+import org.forstdb.ColumnFamilyOptions;
+import org.forstdb.CompactionStyle;
+import org.forstdb.CompressionType;
+import org.forstdb.DBOptions;
+import org.forstdb.FlushOptions;
+import org.forstdb.InfoLogLevel;
+import org.forstdb.util.SizeUnit;
 import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.jupiter.api.Timeout;
 import org.junit.rules.TemporaryFolder;
-import org.rocksdb.BlockBasedTableConfig;
-import org.rocksdb.BloomFilter;
-import org.rocksdb.ColumnFamilyOptions;
-import org.rocksdb.CompactionStyle;
-import org.rocksdb.CompressionType;
-import org.rocksdb.DBOptions;
-import org.rocksdb.FlushOptions;
-import org.rocksdb.InfoLogLevel;
-import org.rocksdb.util.SizeUnit;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -110,7 +109,7 @@ public class ForStStateBackendConfigTest {
         }
         try (ForStResourceContainer container =
                 backend.createOptionsAndResourceContainer(
-                        new File(longInstanceBasePath.toString()))) {
+                        new Path(longInstanceBasePath.toString()))) {
             assertTrue(container.getDbOptions().dbLogDir().isEmpty());
         } finally {
             logFile.delete();
@@ -146,10 +145,9 @@ public class ForStStateBackendConfigTest {
                 createKeyedStateBackend(forStStateBackend, env, IntSerializer.INSTANCE);
 
         try {
-            File instanceBasePath = keyedBackend.getLocalBasePath();
+            Path instanceBasePath = keyedBackend.getLocalBasePath();
             assertThat(
-                    instanceBasePath.getAbsolutePath(),
-                    anyOf(startsWith(testDir1), startsWith(testDir2)));
+                    instanceBasePath.getPath(), anyOf(startsWith(testDir1), startsWith(testDir2)));
 
             //noinspection NullArgumentToVariableArgMethod
             forStStateBackend.setLocalDbStoragePaths(null);
@@ -163,7 +161,6 @@ public class ForStStateBackendConfigTest {
 
     @Test
     public void testConfigureForStCompressionPerLevel() throws Exception {
-        GlobalConfiguration.setStandardYaml(false);
         final MockEnvironment env = getMockEnvironment(tempFolder.newFolder());
         ForStStateBackend forStStateBackend = new ForStStateBackend();
         CompressionType[] compressionTypes = {
@@ -178,13 +175,13 @@ public class ForStStateBackendConfigTest {
                 forStStateBackend.configure(conf, Thread.currentThread().getContextClassLoader());
 
         ForStResourceContainer resourceContainer =
-                forStStateBackend.createOptionsAndResourceContainer(tempFolder.newFile());
+                forStStateBackend.createOptionsAndResourceContainer(
+                        new Path(tempFolder.newFile().getAbsolutePath()));
         ColumnFamilyOptions columnFamilyOptions = resourceContainer.getColumnOptions();
         assertArrayEquals(compressionTypes, columnFamilyOptions.compressionPerLevel().toArray());
 
         resourceContainer.close();
         env.close();
-        GlobalConfiguration.setStandardYaml(true);
     }
 
     @Test
@@ -236,9 +233,8 @@ public class ForStStateBackendConfigTest {
                 createKeyedStateBackend(forStBackend, env, IntSerializer.INSTANCE);
 
         try {
-            File instanceBasePath = keyedBackend.getLocalBasePath();
-            assertThat(
-                    instanceBasePath.getAbsolutePath(), startsWith(expectedPath.getAbsolutePath()));
+            Path instanceBasePath = keyedBackend.getLocalBasePath();
+            assertThat(instanceBasePath.getPath(), startsWith(expectedPath.getAbsolutePath()));
 
             //noinspection NullArgumentToVariableArgMethod
             forStBackend.setLocalDbStoragePaths(null);
@@ -292,11 +288,11 @@ public class ForStStateBackendConfigTest {
         ForStKeyedStateBackend<Integer> keyedBackend =
                 createKeyedStateBackend(forStBackend, env, IntSerializer.INSTANCE);
 
-        File localBasePath = keyedBackend.getLocalBasePath();
-        File localForStPath = new File(localBasePath, "db");
+        Path localBasePath = keyedBackend.getLocalBasePath();
+        Path localForStPath = new Path(localBasePath, "db");
 
         // avoid tests without relocate.
-        Assume.assumeTrue(localForStPath.getAbsolutePath().length() <= 255 - "_LOG".length());
+        Assume.assumeTrue(localForStPath.getPath().length() <= 255 - "_LOG".length());
 
         java.nio.file.Path[] relocatedDbLogs;
         try {
@@ -357,8 +353,8 @@ public class ForStStateBackendConfigTest {
                                 cancelStreamRegistry));
 
         try {
-            File instanceBasePath = keyedBackend.getLocalBasePath();
-            assertThat(instanceBasePath.getAbsolutePath(), startsWith(dir1.getAbsolutePath()));
+            Path instanceBasePath = keyedBackend.getLocalBasePath();
+            assertThat(instanceBasePath.getPath(), startsWith(dir1.getAbsolutePath()));
         } finally {
             keyedBackend.dispose();
             keyedBackend.close();

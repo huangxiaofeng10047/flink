@@ -20,6 +20,7 @@ package org.apache.flink.streaming.api.graph;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.attribute.Attribute;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.operators.ResourceSpec;
@@ -37,6 +38,7 @@ import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,10 +54,13 @@ import static org.apache.flink.util.Preconditions.checkState;
 
 /** Class representing the operators in the streaming programs, with all their properties. */
 @Internal
-public class StreamNode {
+public class StreamNode implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final int id;
     private int parallelism;
+
     /**
      * Maximum parallelism for this stream node. The maximum parallelism is the upper limit for
      * dynamic scaling and the number of key groups used for partitioned state.
@@ -75,7 +80,9 @@ public class StreamNode {
     private KeySelector<?, ?>[] statePartitioners = new KeySelector[0];
     private TypeSerializer<?> stateKeySerializer;
 
-    private @Nullable StreamOperatorFactory<?> operatorFactory;
+    // Mark the operator factory as transient because we will manually parallelize its serialization
+    // when serializing StreamGraph.
+    private @Nullable transient StreamOperatorFactory<?> operatorFactory;
     private TypeSerializer<?>[] typeSerializersIn = new TypeSerializer[0];
     private TypeSerializer<?> typeSerializerOut;
 
@@ -97,6 +104,8 @@ public class StreamNode {
     private boolean supportsConcurrentExecutionAttempts = true;
 
     private boolean parallelismConfigured = false;
+
+    private Attribute attribute = new Attribute.Builder().build();
 
     @VisibleForTesting
     public StreamNode(
@@ -189,6 +198,14 @@ public class StreamNode {
         return id;
     }
 
+    public void setAttribute(Attribute attribute) {
+        this.attribute = attribute;
+    }
+
+    public Attribute getAttribute() {
+        return attribute;
+    }
+
     public int getParallelism() {
         return parallelism;
     }
@@ -208,7 +225,7 @@ public class StreamNode {
      *
      * @return Maximum parallelism
      */
-    int getMaxParallelism() {
+    public int getMaxParallelism() {
         return maxParallelism;
     }
 
@@ -217,7 +234,7 @@ public class StreamNode {
      *
      * @param maxParallelism Maximum parallelism to be set
      */
-    void setMaxParallelism(int maxParallelism) {
+    public void setMaxParallelism(int maxParallelism) {
         this.maxParallelism = maxParallelism;
     }
 
@@ -449,5 +466,9 @@ public class StreamNode {
             return false;
         }
         return operatorFactory.getOperatorAttributes().isOutputOnlyAfterEndOfStream();
+    }
+
+    public void setOperatorFactory(StreamOperatorFactory<?> streamOperatorFactory) {
+        this.operatorFactory = streamOperatorFactory;
     }
 }

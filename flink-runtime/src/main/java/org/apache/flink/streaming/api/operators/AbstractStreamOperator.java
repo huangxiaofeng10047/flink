@@ -95,7 +95,6 @@ import static org.apache.flink.util.Preconditions.checkState;
 @PublicEvolving
 public abstract class AbstractStreamOperator<OUT>
         implements StreamOperator<OUT>,
-                SetupableStreamOperator<OUT>,
                 YieldingOperator<OUT>,
                 CheckpointedStreamOperator,
                 KeyContextHandler,
@@ -104,11 +103,6 @@ public abstract class AbstractStreamOperator<OUT>
 
     /** The logger used by the operator class and its subclasses. */
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractStreamOperator.class);
-
-    // ----------- configuration properties -------------
-
-    // A sane default for most operators
-    protected ChainingStrategy chainingStrategy = ChainingStrategy.HEAD;
 
     // ---------------- runtime fields ------------------
 
@@ -119,7 +113,7 @@ public abstract class AbstractStreamOperator<OUT>
 
     protected transient Output<StreamRecord<OUT>> output;
 
-    private transient IndexedCombinedWatermarkStatus combinedWatermark;
+    protected transient IndexedCombinedWatermarkStatus combinedWatermark;
 
     /** The runtime context for UDFs. */
     private transient StreamingRuntimeContext runtimeContext;
@@ -164,12 +158,24 @@ public abstract class AbstractStreamOperator<OUT>
     protected transient RecordAttributes lastRecordAttributes1;
     protected transient RecordAttributes lastRecordAttributes2;
 
+    public AbstractStreamOperator() {}
+
+    public AbstractStreamOperator(StreamOperatorParameters<OUT> parameters) {
+        if (parameters != null) {
+            setup(
+                    parameters.getContainingTask(),
+                    parameters.getStreamConfig(),
+                    parameters.getOutput());
+            this.processingTimeService =
+                    Preconditions.checkNotNull(parameters.getProcessingTimeService());
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Life Cycle
     // ------------------------------------------------------------------------
 
-    @Override
-    public void setup(
+    protected void setup(
             StreamTask<?, ?> containingTask,
             StreamConfig config,
             Output<StreamRecord<OUT>> output) {
@@ -246,12 +252,7 @@ public abstract class AbstractStreamOperator<OUT>
         lastRecordAttributes2 = RecordAttributes.EMPTY_RECORD_ATTRIBUTES;
     }
 
-    /**
-     * @deprecated The {@link ProcessingTimeService} instance should be passed by the operator
-     *     constructor and this method will be removed along with {@link SetupableStreamOperator}.
-     */
-    @Deprecated
-    public void setProcessingTimeService(ProcessingTimeService processingTimeService) {
+    protected void setProcessingTimeService(ProcessingTimeService processingTimeService) {
         this.processingTimeService = Preconditions.checkNotNull(processingTimeService);
     }
 
@@ -285,12 +286,15 @@ public abstract class AbstractStreamOperator<OUT>
                                 runtimeContext.getJobConfiguration(),
                                 runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(),
                                 runtimeContext.getUserCodeClassLoader()),
-                        isUsingCustomRawKeyedState());
-
+                        isUsingCustomRawKeyedState(),
+                        isAsyncStateProcessingEnabled());
         stateHandler =
                 new StreamOperatorStateHandler(
                         context, getExecutionConfig(), streamTaskCloseableRegistry);
-        timeServiceManager = context.internalTimerServiceManager();
+        timeServiceManager =
+                isAsyncStateProcessingEnabled()
+                        ? context.asyncInternalTimerServiceManager()
+                        : context.internalTimerServiceManager();
         stateHandler.initializeOperatorState(this);
         runtimeContext.setKeyedStateStore(stateHandler.getKeyedStateStore().orElse(null));
     }
@@ -316,6 +320,14 @@ public abstract class AbstractStreamOperator<OUT>
      */
     @Internal
     protected boolean isUsingCustomRawKeyedState() {
+        return false;
+    }
+
+    /**
+     * Indicates whether this operator is enabling the async state. Can be overridden by subclasses.
+     */
+    @Internal
+    public boolean isAsyncStateProcessingEnabled() {
         return false;
     }
 
@@ -400,7 +412,8 @@ public abstract class AbstractStreamOperator<OUT>
                 timestamp,
                 checkpointOptions,
                 factory,
-                isUsingCustomRawKeyedState());
+                isUsingCustomRawKeyedState(),
+                isAsyncStateProcessingEnabled());
     }
 
     /**
@@ -590,16 +603,6 @@ public abstract class AbstractStreamOperator<OUT>
     //  Context and chaining properties
     // ------------------------------------------------------------------------
 
-    @Override
-    public final void setChainingStrategy(ChainingStrategy strategy) {
-        this.chainingStrategy = strategy;
-    }
-
-    @Override
-    public final ChainingStrategy getChainingStrategy() {
-        return chainingStrategy;
-    }
-
     // ------------------------------------------------------------------------
     //  Metrics
     // ------------------------------------------------------------------------
@@ -658,10 +661,10 @@ public abstract class AbstractStreamOperator<OUT>
         @SuppressWarnings("unchecked")
         InternalTimeServiceManager<K> keyedTimeServiceHandler =
                 (InternalTimeServiceManager<K>) timeServiceManager;
-        KeyedStateBackend<K> keyedStateBackend = getKeyedStateBackend();
-        checkState(keyedStateBackend != null, "Timers can only be used on keyed operators.");
+        TypeSerializer<K> keySerializer = stateHandler.getKeySerializer();
+        checkState(keySerializer != null, "Timers can only be used on keyed operators.");
         return keyedTimeServiceHandler.getInternalTimerService(
-                name, keyedStateBackend.getKeySerializer(), namespaceSerializer, triggerable);
+                name, keySerializer, namespaceSerializer, triggerable);
     }
 
     public void processWatermark(Watermark mark) throws Exception {
@@ -697,7 +700,7 @@ public abstract class AbstractStreamOperator<OUT>
         output.emitWatermarkStatus(watermarkStatus);
     }
 
-    private void processWatermarkStatus(WatermarkStatus watermarkStatus, int index)
+    protected void processWatermarkStatus(WatermarkStatus watermarkStatus, int index)
             throws Exception {
         boolean wasIdle = combinedWatermark.isIdle();
         if (combinedWatermark.updateStatus(index, watermarkStatus.isIdle())) {

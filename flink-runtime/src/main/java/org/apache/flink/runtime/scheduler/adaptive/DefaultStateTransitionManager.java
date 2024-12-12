@@ -19,6 +19,7 @@
 package org.apache.flink.runtime.scheduler.adaptive;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
@@ -28,7 +29,6 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,51 +69,54 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
     private final StateTransitionManager.Context transitionContext;
     private Phase phase;
     private final List<ScheduledFuture<?>> scheduledFutures;
+    private final Duration resourceStabilizationTimeout;
+    private final Duration maxTriggerDelay;
 
-    @VisibleForTesting final Duration cooldownTimeout;
-    @Nullable @VisibleForTesting final Duration resourceStabilizationTimeout;
-    @VisibleForTesting final Duration maxTriggerDelay;
-
+    /**
+     * Creates a {@code DefaultStateTransitionManager} instance with the given parameters.
+     *
+     * @param transitionContext The context for the {@code StateTransitionManager}.
+     * @param clock A supplier for the current time.
+     * @param cooldownTimeout The timeout for the cooldown phase.
+     * @param resourceStabilizationTimeout The timeout for the resource stabilization phase.
+     * @param maxTriggerDelay The maximum delay for triggering a {@link AdaptiveScheduler}'s state
+     *     transition if only sufficient resources are available.
+     */
     DefaultStateTransitionManager(
-            Temporal initializationTime,
-            StateTransitionManager.Context transitionContext,
-            Duration cooldownTimeout,
-            @Nullable Duration resourceStabilizationTimeout,
-            Duration maxTriggerDelay) {
-        this(
-                initializationTime,
-                Instant::now,
-                transitionContext,
-                cooldownTimeout,
-                resourceStabilizationTimeout,
-                maxTriggerDelay);
-    }
-
-    @VisibleForTesting
-    DefaultStateTransitionManager(
-            Temporal initializationTime,
+            Context transitionContext,
             Supplier<Temporal> clock,
-            StateTransitionManager.Context transitionContext,
             Duration cooldownTimeout,
-            @Nullable Duration resourceStabilizationTimeout,
+            Duration resourceStabilizationTimeout,
             Duration maxTriggerDelay) {
 
-        this.clock = clock;
+        this.clock = Preconditions.checkNotNull(clock);
+        Preconditions.checkArgument(
+                !maxTriggerDelay.isNegative(), "Max trigger delay must not be negative");
         this.maxTriggerDelay = maxTriggerDelay;
-        this.cooldownTimeout = cooldownTimeout;
-        this.resourceStabilizationTimeout = resourceStabilizationTimeout;
-        this.transitionContext = transitionContext;
+        this.resourceStabilizationTimeout =
+                Preconditions.checkNotNull(resourceStabilizationTimeout);
+        Preconditions.checkArgument(
+                !resourceStabilizationTimeout.isNegative(),
+                "Resource stabilization timeout must not be negative");
+        this.transitionContext = Preconditions.checkNotNull(transitionContext);
         this.scheduledFutures = new ArrayList<>();
-        this.phase = new Cooldown(initializationTime, clock, this, cooldownTimeout);
+        this.phase =
+                new Cooldown(
+                        Preconditions.checkNotNull(clock.get()),
+                        clock,
+                        this,
+                        Preconditions.checkNotNull(cooldownTimeout));
     }
 
     @Override
     public void onChange() {
+        LOG.debug("OnChange event received in phase {} for job {}.", getPhase(), getJobId());
         phase.onChange();
     }
 
     @Override
     public void onTrigger() {
+        LOG.debug("OnTrigger event received in phase {} for job {}.", getPhase(), getJobId());
         phase.onTrigger();
     }
 
@@ -155,7 +158,7 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
         Preconditions.checkState(
                 !(phase instanceof Transitioning),
                 "The state transition operation has already been triggered.");
-        LOG.debug("Transitioning from {} to {}.", phase, newPhase);
+        LOG.info("Transitioning from {} to {}, job {}.", phase, newPhase, getJobId());
         phase = newPhase;
     }
 
@@ -170,50 +173,15 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
             callback.run();
         } else {
             LOG.debug(
-                    "Ignoring scheduled action because expected phase {} is not the actual phase {}.",
+                    "Ignoring scheduled action because expected phase {} is not the actual phase {}, job {}.",
                     expectedPhase,
-                    getPhase());
+                    getPhase(),
+                    getJobId());
         }
     }
 
-    /** Factory for creating {@link DefaultStateTransitionManager} instances. */
-    public static class Factory implements StateTransitionManager.Factory {
-
-        private final Duration cooldownTimeout;
-        @Nullable private final Duration resourceStabilizationTimeout;
-        private final Duration maximumDelayForTrigger;
-
-        /**
-         * Creates a {@code Factory} instance based on the {@link AdaptiveScheduler}'s {@code
-         * Settings} for rescaling.
-         */
-        public static Factory fromSettings(AdaptiveScheduler.Settings settings) {
-            // it's not ideal that we use a AdaptiveScheduler internal class here. We might want to
-            // change that as part of a more general alignment of the rescaling configuration.
-            return new Factory(
-                    settings.getScalingIntervalMin(),
-                    settings.getScalingIntervalMax(),
-                    settings.getMaximumDelayForTriggeringRescale());
-        }
-
-        private Factory(
-                Duration cooldownTimeout,
-                @Nullable Duration resourceStabilizationTimeout,
-                Duration maximumDelayForTrigger) {
-            this.cooldownTimeout = cooldownTimeout;
-            this.resourceStabilizationTimeout = resourceStabilizationTimeout;
-            this.maximumDelayForTrigger = maximumDelayForTrigger;
-        }
-
-        @Override
-        public DefaultStateTransitionManager create(Context context, Instant lastStateTransition) {
-            return new DefaultStateTransitionManager(
-                    lastStateTransition,
-                    context,
-                    cooldownTimeout,
-                    resourceStabilizationTimeout,
-                    maximumDelayForTrigger);
-        }
+    private JobID getJobId() {
+        return transitionContext.getJobId();
     }
 
     /**
@@ -266,6 +234,15 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
         void onChange() {}
 
         void onTrigger() {}
+
+        @Override
+        public String toString() {
+            return getClass().getSimpleName();
+        }
+
+        JobID getJobId() {
+            return context.getJobId();
+        }
     }
 
     /**
@@ -340,19 +317,18 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
         private Stabilizing(
                 Supplier<Temporal> clock,
                 DefaultStateTransitionManager context,
-                @Nullable Duration resourceStabilizationTimeout,
+                Duration resourceStabilizationTimeout,
                 Temporal firstOnChangeEventTimestamp,
                 Duration maxTriggerDelay) {
             super(clock, context);
             this.onChangeEventTimestamp = firstOnChangeEventTimestamp;
             this.maxTriggerDelay = maxTriggerDelay;
 
-            if (resourceStabilizationTimeout != null) {
-                scheduleRelativelyTo(
-                        () -> context().progressToStabilized(firstOnChangeEventTimestamp),
-                        firstOnChangeEventTimestamp,
-                        resourceStabilizationTimeout);
-            }
+            scheduleRelativelyTo(
+                    () -> context().progressToStabilized(firstOnChangeEventTimestamp),
+                    firstOnChangeEventTimestamp,
+                    resourceStabilizationTimeout);
+
             scheduleTransitionEvaluation();
         }
 
@@ -384,10 +360,14 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
 
         private void transitionToSubSequentStateForDesiredResources() {
             if (hasDesiredResources()) {
+                LOG.info(
+                        "Desired resources are met, transitioning to the subsequent state, job {}.",
+                        getJobId());
                 context().triggerTransitionToSubsequentState();
             } else {
                 LOG.debug(
-                        "Desired resources are not met, skipping the transition to the subsequent state.");
+                        "Desired resources are not met, skipping the transition to the subsequent state, job {}.",
+                        getJobId());
             }
         }
     }
@@ -406,15 +386,28 @@ public class DefaultStateTransitionManager implements StateTransitionManager {
                 Temporal firstChangeEventTimestamp,
                 Duration maxTriggerDelay) {
             super(clock, context);
-            this.scheduleRelativelyTo(this::onTrigger, firstChangeEventTimestamp, maxTriggerDelay);
+            this.scheduleRelativelyTo(
+                    () -> {
+                        LOG.info(
+                                "Scheduled onTrigger event fired in Stabilized phase, job {}.",
+                                getJobId());
+                        onTrigger();
+                    },
+                    firstChangeEventTimestamp,
+                    maxTriggerDelay);
         }
 
         @Override
         void onTrigger() {
             if (hasSufficientResources()) {
+                LOG.info(
+                        "Sufficient resources are met, progressing to subsequent state, job {}.",
+                        getJobId());
                 context().triggerTransitionToSubsequentState();
             } else {
-                LOG.debug("Sufficient resources are not met, progressing to idling.");
+                LOG.debug(
+                        "Sufficient resources are not met, progressing to idling, job {}.",
+                        getJobId());
                 context().progressToIdling();
             }
         }

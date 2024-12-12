@@ -17,7 +17,6 @@
  */
 package org.apache.flink.table.planner.plan.batch.sql
 
-import org.apache.flink.api.scala._
 import org.apache.flink.table.api._
 import org.apache.flink.table.api.config.OptimizerConfigOptions
 import org.apache.flink.table.planner.utils.TableTestBase
@@ -174,5 +173,19 @@ class TableSinkTest extends TableTestBase {
     stmtSet.addInsertSql("INSERT INTO sink SELECT * FROM MyTable")
 
     util.verifyAstPlan(stmtSet)
+  }
+
+  @Test
+  def testCreateTableAsSelectWithOrderKeyNotProjected(): Unit = {
+    util.verifyExplainInsert(s"""
+                                |create table MyCtasSource
+                                |WITH (
+                                |   'connector' = 'values'
+                                |) as select b, c, d from
+                                |  (values
+                                |    (1, 1, 2, 'd1')
+                                |  ) as V(a, b, c, d)
+                                |  order by a
+                                |""".stripMargin)
   }
 }

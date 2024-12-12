@@ -25,7 +25,6 @@ import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.runtime.asyncprocessing.AsyncExecutionController;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
-import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
 import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.KeyGroupStatePartitionStreamProvider;
 import org.apache.flink.runtime.state.KeyGroupedInternalPriorityQueue;
@@ -45,6 +44,7 @@ import java.io.InputStream;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -101,21 +101,21 @@ public class InternalTimeServiceManagerImpl<K> implements InternalTimeServiceMan
      */
     public static <K> InternalTimeServiceManagerImpl<K> create(
             TaskIOMetricGroup taskIOMetricGroup,
-            CheckpointableKeyedStateBackend<K> keyedStateBackend,
+            PriorityQueueSetFactory factory,
+            KeyGroupRange keyGroupRange,
             ClassLoader userClassloader,
             KeyContext keyContext,
             ProcessingTimeService processingTimeService,
             Iterable<KeyGroupStatePartitionStreamProvider> rawKeyedStates,
             StreamTaskCancellationContext cancellationContext)
             throws Exception {
-        final KeyGroupRange keyGroupRange = keyedStateBackend.getKeyGroupRange();
 
         final InternalTimeServiceManagerImpl<K> timeServiceManager =
                 new InternalTimeServiceManagerImpl<>(
                         taskIOMetricGroup,
                         keyGroupRange,
                         keyContext,
-                        keyedStateBackend,
+                        factory,
                         processingTimeService,
                         cancellationContext);
 
@@ -239,10 +239,14 @@ public class InternalTimeServiceManagerImpl<K> implements InternalTimeServiceMan
     }
 
     @Override
-    public void advanceWatermark(Watermark watermark) throws Exception {
+    public CompletableFuture<Void> advanceWatermark(Watermark watermark) throws Exception {
+        CompletableFuture<?>[] futures = new CompletableFuture[timerServices.size()];
+        int index = 0;
         for (InternalTimerServiceImpl<?, ?> service : timerServices.values()) {
-            service.advanceWatermark(watermark.getTimestamp());
+            futures[index] = service.advanceWatermark(watermark.getTimestamp());
+            index++;
         }
+        return CompletableFuture.allOf(futures);
     }
 
     @Override

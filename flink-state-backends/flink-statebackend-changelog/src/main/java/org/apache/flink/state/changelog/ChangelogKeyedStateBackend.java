@@ -173,6 +173,7 @@ public class ChangelogKeyedStateBackend<K>
      * #stateChangelogWriter} about changelog ranges that were confirmed or aborted by JM.
      */
     @Nullable private SequenceNumber lastUploadedFrom;
+
     /**
      * {@link SequenceNumber} denoting last upload range <b>end</b>, exclusive. Updated to {@link
      * StateChangelogWriter#nextSequenceNumber()} when {@link #snapshot(long, long,
@@ -296,6 +297,11 @@ public class ChangelogKeyedStateBackend<K>
     @Override
     public K getCurrentKey() {
         return keyedStateBackend.getCurrentKey();
+    }
+
+    @Override
+    public void setCurrentKeyAndKeyGroup(K newKey, int newKeyGroupIndex) {
+        keyedStateBackend.setCurrentKeyAndKeyGroup(newKey, newKeyGroupIndex);
     }
 
     @Override

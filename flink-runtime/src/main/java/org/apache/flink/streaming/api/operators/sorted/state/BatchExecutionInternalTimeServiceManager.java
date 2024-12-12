@@ -21,10 +21,11 @@ package org.apache.flink.streaming.api.operators.sorted.state;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.runtime.asyncprocessing.AsyncExecutionController;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
-import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
+import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.KeyGroupStatePartitionStreamProvider;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateCheckpointOutputStream;
+import org.apache.flink.runtime.state.PriorityQueueSetFactory;
 import org.apache.flink.streaming.api.operators.InternalTimeServiceManager;
 import org.apache.flink.streaming.api.operators.InternalTimerService;
 import org.apache.flink.streaming.api.operators.KeyContext;
@@ -36,6 +37,7 @@ import org.apache.flink.util.WrappingRuntimeException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -85,10 +87,11 @@ public class BatchExecutionInternalTimeServiceManager<K>
     }
 
     @Override
-    public void advanceWatermark(Watermark watermark) {
+    public CompletableFuture<Void> advanceWatermark(Watermark watermark) {
         if (watermark.getTimestamp() == Long.MAX_VALUE) {
             keySelected(null);
         }
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
@@ -106,19 +109,21 @@ public class BatchExecutionInternalTimeServiceManager<K>
 
     public static <K> InternalTimeServiceManager<K> create(
             TaskIOMetricGroup taskIOMetricGroup,
-            CheckpointableKeyedStateBackend<K> keyedStatedBackend,
+            PriorityQueueSetFactory factory,
+            KeyGroupRange keyGroupRange,
             ClassLoader userClassloader,
             KeyContext keyContext, // the operator
             ProcessingTimeService processingTimeService,
             Iterable<KeyGroupStatePartitionStreamProvider> rawKeyedStates,
             StreamTaskCancellationContext cancellationContext) {
         checkState(
-                keyedStatedBackend instanceof BatchExecutionKeyedStateBackend,
+                factory instanceof BatchExecutionKeyedStateBackend,
                 "Batch execution specific time service can work only with BatchExecutionKeyedStateBackend");
 
         BatchExecutionInternalTimeServiceManager<K> timeServiceManager =
                 new BatchExecutionInternalTimeServiceManager<>(processingTimeService);
-        keyedStatedBackend.registerKeySelectionListener(timeServiceManager);
+        ((BatchExecutionKeyedStateBackend) factory)
+                .registerKeySelectionListener(timeServiceManager);
         return timeServiceManager;
     }
 

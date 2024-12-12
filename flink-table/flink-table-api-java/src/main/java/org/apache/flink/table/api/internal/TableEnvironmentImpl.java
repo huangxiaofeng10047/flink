@@ -81,6 +81,8 @@ import org.apache.flink.table.factories.TableFactoryUtil;
 import org.apache.flink.table.functions.ScalarFunction;
 import org.apache.flink.table.functions.UserDefinedFunction;
 import org.apache.flink.table.functions.UserDefinedFunctionHelper;
+import org.apache.flink.table.legacy.sinks.TableSink;
+import org.apache.flink.table.legacy.sources.TableSource;
 import org.apache.flink.table.module.Module;
 import org.apache.flink.table.module.ModuleEntry;
 import org.apache.flink.table.module.ModuleManager;
@@ -108,8 +110,6 @@ import org.apache.flink.table.operations.utils.OperationTreeBuilder;
 import org.apache.flink.table.resource.ResourceManager;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
-import org.apache.flink.table.sinks.TableSink;
-import org.apache.flink.table.sources.TableSource;
 import org.apache.flink.table.sources.TableSourceValidation;
 import org.apache.flink.table.types.AbstractDataType;
 import org.apache.flink.table.types.DataType;
@@ -485,22 +485,34 @@ public class TableEnvironmentImpl implements TableEnvironmentInternal {
 
     @Override
     public void createTemporaryTable(String path, TableDescriptor descriptor) {
+        this.createTemporaryTable(path, descriptor, false);
+    }
+
+    @Override
+    public void createTemporaryTable(
+            String path, TableDescriptor descriptor, boolean ignoreIfExists) {
         Preconditions.checkNotNull(path, "Path must not be null.");
         Preconditions.checkNotNull(descriptor, "Table descriptor must not be null.");
 
         final ObjectIdentifier tableIdentifier =
                 catalogManager.qualifyIdentifier(getParser().parseIdentifier(path));
-        catalogManager.createTemporaryTable(descriptor.toCatalogTable(), tableIdentifier, false);
+        catalogManager.createTemporaryTable(
+                descriptor.toCatalogTable(), tableIdentifier, ignoreIfExists);
     }
 
     @Override
     public void createTable(String path, TableDescriptor descriptor) {
+        this.createTable(path, descriptor, false);
+    }
+
+    @Override
+    public void createTable(String path, TableDescriptor descriptor, boolean ignoreIfExists) {
         Preconditions.checkNotNull(path, "Path must not be null.");
         Preconditions.checkNotNull(descriptor, "Table descriptor must not be null.");
 
         final ObjectIdentifier tableIdentifier =
                 catalogManager.qualifyIdentifier(getParser().parseIdentifier(path));
-        catalogManager.createTable(descriptor.toCatalogTable(), tableIdentifier, false);
+        catalogManager.createTable(descriptor.toCatalogTable(), tableIdentifier, ignoreIfExists);
     }
 
     @Override
@@ -589,7 +601,10 @@ public class TableEnvironmentImpl implements TableEnvironmentInternal {
 
     @Override
     public String[] listDatabases() {
-        return catalogManager.getCatalog(catalogManager.getCurrentCatalog()).get().listDatabases()
+        return catalogManager
+                .getCatalog(catalogManager.getCurrentCatalog())
+                .get()
+                .listDatabases()
                 .stream()
                 .sorted()
                 .toArray(String[]::new);

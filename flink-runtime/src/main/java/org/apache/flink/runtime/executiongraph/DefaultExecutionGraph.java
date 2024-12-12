@@ -25,7 +25,6 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.api.common.accumulators.AccumulatorHelper;
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.DefaultJobExecutionStatusEvent;
 import org.apache.flink.core.execution.JobStatusChangedListener;
@@ -102,6 +101,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -184,7 +184,7 @@ public class DefaultExecutionGraph implements ExecutionGraph, InternalExecutionG
     private final long[] stateTimestamps;
 
     /** The timeout for all messages that require a response/acknowledgement. */
-    private final Time rpcTimeout;
+    private final Duration rpcTimeout;
 
     /** The classloader for the user code. Needed for calls into user code classes. */
     private final ClassLoader userClassLoader;
@@ -222,9 +222,6 @@ public class DefaultExecutionGraph implements ExecutionGraph, InternalExecutionG
 
     /** Current status of the job execution. */
     private volatile JobStatus state = JobStatus.CREATED;
-
-    /** The job type of the job execution. */
-    private final JobType jobType;
 
     /** A future that completes once the job has reached a terminal state. */
     private final CompletableFuture<JobStatus> terminationFuture = new CompletableFuture<>();
@@ -311,11 +308,10 @@ public class DefaultExecutionGraph implements ExecutionGraph, InternalExecutionG
     // --------------------------------------------------------------------------------------------
 
     public DefaultExecutionGraph(
-            JobType jobType,
             JobInformation jobInformation,
             ScheduledExecutorService futureExecutor,
             Executor ioExecutor,
-            Time rpcTimeout,
+            Duration rpcTimeout,
             int executionHistorySizeLimit,
             ClassLoader userClassLoader,
             BlobWriter blobWriter,
@@ -334,7 +330,6 @@ public class DefaultExecutionGraph implements ExecutionGraph, InternalExecutionG
             TaskDeploymentDescriptorFactory taskDeploymentDescriptorFactory,
             List<JobStatusChangedListener> jobStatusChangedListeners) {
 
-        this.jobType = jobType;
         this.executionGraphId = new ExecutionGraphID();
 
         this.jobInformation = checkNotNull(jobInformation);
@@ -645,7 +640,7 @@ public class DefaultExecutionGraph implements ExecutionGraph, InternalExecutionG
 
     @Override
     public JobType getJobType() {
-        return jobType;
+        return jobInformation.getJobType();
     }
 
     @Override

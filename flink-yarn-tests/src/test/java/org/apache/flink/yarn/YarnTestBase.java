@@ -431,7 +431,9 @@ public abstract class YarnTestBase {
         private String[] names;
         private String excludeInPath = null;
 
-        /** @param names which have to be included in the filename. */
+        /**
+         * @param names which have to be included in the filename.
+         */
         public ContainsName(String[] names) {
             this.names = names;
         }
@@ -829,7 +831,8 @@ public abstract class YarnTestBase {
             final String confDirPath = flinkConfDirPath.getParentFile().getAbsolutePath();
             globalConfiguration = GlobalConfiguration.loadConfiguration(confDirPath);
             globalConfiguration.set(
-                    JobManagerOptions.RESOURCE_WAIT_TIMEOUT, Duration.ofSeconds(30));
+                    JobManagerOptions.SCHEDULER_SUBMISSION_RESOURCE_WAIT_TIMEOUT,
+                    Duration.ofSeconds(30));
 
             // copy conf dir to test temporary workspace location
             tempConfPathForSecureRun = tmp.toPath().resolve("conf").toFile();

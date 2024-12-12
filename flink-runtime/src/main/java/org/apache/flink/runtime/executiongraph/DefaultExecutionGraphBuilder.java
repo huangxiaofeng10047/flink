@@ -19,7 +19,6 @@
 package org.apache.flink.runtime.executiongraph;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.configuration.JobManagerOptions;
@@ -40,7 +39,6 @@ import org.apache.flink.runtime.executiongraph.failover.partitionrelease.Partiti
 import org.apache.flink.runtime.executiongraph.failover.partitionrelease.PartitionGroupReleaseStrategyFactoryLoader;
 import org.apache.flink.runtime.io.network.partition.JobMasterPartitionTracker;
 import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.JobType;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.jsonplan.JsonPlanGenerator;
 import org.apache.flink.runtime.jobgraph.tasks.CheckpointCoordinatorConfiguration;
@@ -58,6 +56,7 @@ import org.apache.flink.util.SerializedValue;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -82,7 +81,7 @@ public class DefaultExecutionGraphBuilder {
             CompletedCheckpointStore completedCheckpointStore,
             CheckpointsCleaner checkpointsCleaner,
             CheckpointIDCounter checkpointIdCounter,
-            Time rpcTimeout,
+            Duration rpcTimeout,
             BlobWriter blobWriter,
             Logger log,
             ShuffleMaster<?> shuffleMaster,
@@ -105,12 +104,11 @@ public class DefaultExecutionGraphBuilder {
 
         final String jobName = jobGraph.getName();
         final JobID jobId = jobGraph.getJobID();
-        final JobType jobType = jobGraph.getJobType();
 
         final JobInformation jobInformation =
                 new JobInformation(
                         jobId,
-                        jobType,
+                        jobGraph.getJobType(),
                         jobName,
                         jobGraph.getSerializedExecutionConfig(),
                         jobGraph.getJobConfiguration(),
@@ -149,7 +147,6 @@ public class DefaultExecutionGraphBuilder {
         // create a new execution graph, if none exists so far
         final DefaultExecutionGraph executionGraph =
                 new DefaultExecutionGraph(
-                        jobGraph.getJobType(),
                         jobInformation,
                         futureExecutor,
                         ioExecutor,

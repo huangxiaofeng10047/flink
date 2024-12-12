@@ -54,7 +54,6 @@ import org.apache.flink.runtime.executiongraph.TaskInformation;
 import org.apache.flink.runtime.externalresource.ExternalResourceInfoProvider;
 import org.apache.flink.runtime.filecache.FileCache;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.io.network.NettyShuffleEnvironment;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
 import org.apache.flink.runtime.io.network.api.writer.ResultPartitionWriter;
 import org.apache.flink.runtime.io.network.partition.PartitionProducerStateProvider;
@@ -286,6 +285,7 @@ public class Task
 
     /** atomic flag that makes sure the invokable is canceled exactly once upon error. */
     private final AtomicBoolean invokableHasBeenCanceled;
+
     /**
      * The invokable of this task, if initialized. All accesses must copy the reference and check
      * for null, as this field is cleared as part of the disposal logic.
@@ -431,13 +431,6 @@ public class Task
             inputGates[counter++] =
                     new InputGateWithMetrics(
                             gate, metrics.getIOMetricGroup().getNumBytesInCounter());
-        }
-
-        if (shuffleEnvironment instanceof NettyShuffleEnvironment) {
-            //noinspection deprecation
-            ((NettyShuffleEnvironment) shuffleEnvironment)
-                    .registerLegacyNetworkMetrics(
-                            metrics.getIOMetricGroup(), resultPartitionWriters, gates);
         }
 
         invokableHasBeenCanceled = new AtomicBoolean(false);

@@ -45,6 +45,7 @@ import org.apache.flink.sql.parser.ddl.SqlDropFunction;
 import org.apache.flink.sql.parser.ddl.SqlDropTable;
 import org.apache.flink.sql.parser.ddl.SqlDropView;
 import org.apache.flink.sql.parser.ddl.SqlRemoveJar;
+import org.apache.flink.sql.parser.ddl.SqlReplaceTableAs;
 import org.apache.flink.sql.parser.ddl.SqlReset;
 import org.apache.flink.sql.parser.ddl.SqlSet;
 import org.apache.flink.sql.parser.ddl.SqlStopJob;
@@ -64,7 +65,6 @@ import org.apache.flink.sql.parser.dml.SqlStatementSet;
 import org.apache.flink.sql.parser.dql.SqlLoadModule;
 import org.apache.flink.sql.parser.dql.SqlRichDescribeTable;
 import org.apache.flink.sql.parser.dql.SqlRichExplain;
-import org.apache.flink.sql.parser.dql.SqlShowCatalogs;
 import org.apache.flink.sql.parser.dql.SqlShowColumns;
 import org.apache.flink.sql.parser.dql.SqlShowCreateTable;
 import org.apache.flink.sql.parser.dql.SqlShowCreateView;
@@ -124,7 +124,6 @@ import org.apache.flink.table.operations.ModifyType;
 import org.apache.flink.table.operations.NopOperation;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.QueryOperation;
-import org.apache.flink.table.operations.ShowCatalogsOperation;
 import org.apache.flink.table.operations.ShowColumnsOperation;
 import org.apache.flink.table.operations.ShowCreateTableOperation;
 import org.apache.flink.table.operations.ShowCreateViewOperation;
@@ -279,8 +278,6 @@ public class SqlNodeToOperationConversion {
             return Optional.of(converter.convertDropCatalog((SqlDropCatalog) validated));
         } else if (validated instanceof SqlLoadModule) {
             return Optional.of(converter.convertLoadModule((SqlLoadModule) validated));
-        } else if (validated instanceof SqlShowCatalogs) {
-            return Optional.of(converter.convertShowCatalogs((SqlShowCatalogs) validated));
         } else if (validated instanceof SqlShowCurrentCatalog) {
             return Optional.of(
                     converter.convertShowCurrentCatalog((SqlShowCurrentCatalog) validated));
@@ -910,11 +907,6 @@ public class SqlNodeToOperationConversion {
         return new AlterDatabaseOperation(catalogName, databaseName, catalogDatabase);
     }
 
-    /** Convert SHOW CATALOGS statement. */
-    private Operation convertShowCatalogs(SqlShowCatalogs sqlShowCatalogs) {
-        return new ShowCatalogsOperation();
-    }
-
     /** Convert SHOW CURRENT CATALOG statement. */
     private Operation convertShowCurrentCatalog(SqlShowCurrentCatalog sqlShowCurrentCatalog) {
         return new ShowCurrentCatalogOperation();
@@ -973,6 +965,16 @@ public class SqlNodeToOperationConversion {
             operation = convertSqlStatementSet((SqlStatementSet) sqlNode);
         } else if (sqlNode.getKind().belongsTo(SqlKind.QUERY)) {
             operation = convertSqlQuery(sqlExplain.getStatement());
+        } else if ((sqlNode instanceof SqlCreateTableAs)
+                || (sqlNode instanceof SqlReplaceTableAs)) {
+            operation =
+                    convert(flinkPlanner, catalogManager, sqlNode)
+                            .orElseThrow(
+                                    () ->
+                                            new ValidationException(
+                                                    String.format(
+                                                            "EXPLAIN statement doesn't support %s",
+                                                            sqlNode.getKind())));
         } else {
             throw new ValidationException(
                     String.format("EXPLAIN statement doesn't support %s", sqlNode.getKind()));

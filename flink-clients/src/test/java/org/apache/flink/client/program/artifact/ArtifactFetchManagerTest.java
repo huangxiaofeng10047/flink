@@ -170,6 +170,21 @@ class ArtifactFetchManagerTest {
     }
 
     @Test
+    void testLocalFetcherNotCreatesBaseDir() throws Exception {
+        Path nonExistingPath =
+                tempDir.resolve("non").resolve("existing").resolve("path").toAbsolutePath();
+        configuration.set(ArtifactFetchOptions.BASE_DIR, nonExistingPath.toString());
+
+        File sourceFile = TestingUtils.getClassFile(getClass());
+        String uriStr = "local://" + sourceFile.toURI().getPath();
+
+        ArtifactFetchManager fetchMgr = new ArtifactFetchManager(configuration);
+        fetchMgr.fetchArtifacts(uriStr, null);
+
+        assertThat(nonExistingPath.getParent().getParent()).doesNotExist();
+    }
+
+    @Test
     void testHttpDisabledError() {
         ArtifactFetchManager fetchMgr = new ArtifactFetchManager(configuration);
         assertThatThrownBy(
@@ -183,9 +198,6 @@ class ArtifactFetchManagerTest {
     @Test
     void testMissingRequiredFetchArgs() {
         ArtifactFetchManager fetchMgr = new ArtifactFetchManager(configuration);
-        assertThatThrownBy(() -> fetchMgr.fetchArtifacts(null, null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("The jobUri is required.");
 
         assertThatThrownBy(() -> fetchMgr.fetchArtifacts(null))
                 .isInstanceOf(IllegalArgumentException.class)

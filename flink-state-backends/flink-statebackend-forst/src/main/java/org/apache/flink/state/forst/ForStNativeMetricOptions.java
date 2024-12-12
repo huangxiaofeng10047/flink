@@ -24,7 +24,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
 
-import org.rocksdb.TickerType;
+import org.forstdb.TickerType;
 
 import java.io.Serializable;
 import java.util.Collection;
@@ -665,12 +665,16 @@ public class ForStNativeMetricOptions implements Serializable {
         this.columnFamilyAsVariable = columnFamilyAsVariable;
     }
 
-    /** @return the enabled RocksDB property-based metrics */
+    /**
+     * @return the enabled RocksDB property-based metrics
+     */
     public Collection<ForStProperty> getProperties() {
         return Collections.unmodifiableCollection(properties);
     }
 
-    /** @return the enabled RocksDB statistics metrics. */
+    /**
+     * @return the enabled RocksDB statistics metrics.
+     */
     public Collection<TickerType> getMonitorTickerTypes() {
         return Collections.unmodifiableCollection(monitorTickerTypes);
     }
@@ -684,7 +688,9 @@ public class ForStNativeMetricOptions implements Serializable {
         return !properties.isEmpty() || isStatisticsEnabled();
     }
 
-    /** @return true if RocksDB statistics metrics are enabled, false otherwise. */
+    /**
+     * @return true if RocksDB statistics metrics are enabled, false otherwise.
+     */
     public boolean isStatisticsEnabled() {
         return !monitorTickerTypes.isEmpty();
     }
